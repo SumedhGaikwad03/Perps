@@ -1,5 +1,5 @@
 import { BACKEND } from "./config";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll } from "bun:test";
 import axios from "axios";
 import { password } from "bun";
 
@@ -98,6 +98,154 @@ describe("auth endpoints", () => {
     
   })
 });
+
+describe("order routes" ,   async () => {
+
+   const User1 = "sumedh_278743" ; // this is our user one 
+      const User2 = "sumedh_443628" ; // this is our second user 
+      const Password = "testpassword " ; // this is our test password for the routes 
+
+      let token1 = "" ;
+      let token2 = ""; 
+
+      let MARKET_ID = "" ; 
+    
+
+  beforeAll( async  () => { 
+
+      // const User1 = "sumedh_278743" ; // this is our user one 
+      // const User2 = "sumedh_443628" ; // this is our second user 
+      // const Password = "testpassword " ; // this is our test password for the routes 
+
+      // let token1 ;
+      // let token2 ; 
+
+      const response1 = await axios.post(`${BACKEND}/api/v1/login` , {
+
+        username : User1, 
+        password : Password
+      } ) ;
+
+      const response2 = await axios.post(`${BACKEND}/api/v1/login` , {
+
+        username : User2, 
+        password : Password
+      } ) ;
+
+    token1 = response1.data.token; 
+    token2 = response2.data.token; 
+
+
+
+
+
+  }) // before anything the this hook will run 
+
+
+  await axios.post(`${BACKEND}/api/v1/onRamp` , {
+
+    amount : 100000
+  } ,{
+
+    headers : {
+      token : token1
+    }
+  })
+
+  await axios.post(`${BACKEND}/api/v1/onRamp` , {
+
+    amount : 100000 
+  } ,{
+
+    headers : {
+      token : token2
+    }
+  })
+
+
+it("first order should sit on the book " , async () => {
+
+  const response = await axios.post(`${BACKEND}/api/v1/order`, {
+
+    price : 100 ,
+    qty : 100 ,
+    side: "long",
+    marketId : MARKET_ID,
+    type : "limit",
+    equity: 1000
+  }, {
+    headers :{
+      token : token1 
+    }
+  })
+
+  expect(response.data.filledQty).toBe(0);
+  expect(response.status).toBe(200);
+  expect(response.data.orderId).toBeDefined();
+
+
+
+
+})
+
+it("second order from user 2 should also sit on the book if its by user 2 " , async () => {
+
+  const response = await axios.post(`${BACKEND}/api/v1/order`, {
+
+    price : 102 ,
+    qty : 10 ,
+    side : "short",
+    marketId : MARKET_ID, 
+    Type : "limit",
+    equity : 5000 
+  }, {
+
+    headers : {
+      token : token1 
+    }
+  })
+  expect(response.data.filledQty).toBe(0);
+  expect(response.status).toBe(200);
+  expect(response.data.orderId).toBeDefined();
+
+})
+
+
+
+
+ it("third order should be matched " , async () => {
+
+  const response = await axios.post(`${BACKEND}/api/v1/order` , {
+
+
+    price :100 ,
+    qty : 5 ,
+    side : "short",
+    marketId : MARKET_ID , 
+    type : "limit" ,
+    equity : 5000 
+ }, {
+  headers : {
+
+    token: token2
+  }
+
+
+  })
+  expect(response.data.filledQty).toBe(5);
+  expect(response.status).toBe(200);
+  expect(response.data.orderId).toBeDefined();
+
+
+
+ })
+
+ 
+
+
+})
+
+
 
 
 
