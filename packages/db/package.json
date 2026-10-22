@@ -3,8 +3,8 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
-  "exports": {
-    "./client" : "./index.ts"
+  "export": {
+    "./": "./index.ts"
   },
   "scripts": {
     "typecheck": "bun check"
@@ -20,6 +20,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
+    "@prisma/client-runtime-utils": "^7.10.1",
     "dotenv": "^18.0.8",
     "pg": "^8.23.1"
   }
