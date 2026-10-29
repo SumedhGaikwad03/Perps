@@ -14,15 +14,17 @@
     "add": "^2.0.9",
     "bun": "^1.4.3",
     "client": "^0.0.1",
-    "db": "workspace:*"
+    "db": "workspace:*",
+    "common": "workspace:*"
   },
   "peerDependencies": {
     "typescript": "^7"
   },
   "dependencies": {
     "@prisma/client-runtime-utils": "^7.10.1",
-    "dotenv": "^18.0.8",
+    "dotenv": "^18.0.9",
     "express": "^5.3.0",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "redis": "^6.3.0"
   }
 }

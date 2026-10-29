@@ -1,19 +1,22 @@
 import type { NextFunction , Request , Response } from "express"; 
 
-import jwt from "jsonwebtoken" ; 
+import jwt, { type JwtPayload } from "jsonwebtoken" ; 
 
 
 export function authmiddleware ( req : Request , res: Response , next :NextFunction){
 
-    const token =  req.headers.token;
+    const token =  req.headers.token as string ;
+
+    //const {userId} = req.body.userId; 
 
     try {
 
-        const decoded = jwt.verfy(token , process.env.JWT_SECRET!); 
+        const decoded = jwt.verify(token , process.env.JWT_SECRET!)  as JwtPayload ; 
 
-        if(decoded){
+        if(decoded.userId){
 
-            req.userId = userId; 
+            req.userId = decoded.userId; 
+            next();
         }
         else{
 
@@ -29,7 +32,7 @@ export function authmiddleware ( req : Request , res: Response , next :NextFunct
     catch(e){
         res.status(403).json({
 
-               Message : "Incorrect token "; 
+               Message : "Incorrect token "
             })
             
         }

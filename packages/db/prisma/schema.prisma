@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -10,76 +7,147 @@ datasource db {
   provider = "postgresql"
 }
 
+// ----------------------------------------------------
+// Enums
+// ----------------------------------------------------
+
+enum OrderStatus {
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+}
+
+enum OrderSide {
+  BID
+  ASK
+}
+
+enum OrderType {
+  LIMIT
+  MARKET
+}
+
+enum TimeInForce {
+  FOK
+  GTC
+}
+
+// ----------------------------------------------------
+// Models
+// ----------------------------------------------------
+
 model User {
-  id          String  @id @default(uuid())
-  username    String
+  id          String     @id @default(uuid())
+  username    String     @unique
   password    String
-  orders      order[]
-  maker_fills fill[]  @relation("maker_fills") // resting limit orders where the user acted as the maker
-  taker_fills fill[]  @relation("taker_fills") // orders where the user acted as the taker
+
+  wallet      Wallet?
+  positions   Position[]
+  orders      Order[]
+  maker_fills Fill[]     @relation("maker_fills")
+  taker_fills Fill[]     @relation("taker_fills")
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
-model market {
-  id     String @id @default(uuid())
-  slug   String
-  imgUrl String
+model Market { 
+  id        String     @id @default(uuid())
+  symbol    String     @unique // e.g. "BTC_USDC"
+  slug      String     @unique
+  imgUrl    String?
+
+  orders    Order[]
+  positions Position[]
+  fills     Fill[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 }
 
-model order {
+model Wallet {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  amountAvail  String   @default("0")
+  amountLocked String   @default("0")
+
+  user         User     @relation(fields: [userId], references: [id])
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Position {
+  id               String   @id @default(uuid())
+  userId           String
+  marketId         String
+  size             String   @default("0") // Signed integer string: >0 Long, <0 Short
+  entryPrice       String   @default("0")
+  leverage         Int      @default(0)
+  liquidationPrice String?
+
+  user             User     @relation(fields: [userId], references: [id])
+  market           Market   @relation(fields: [marketId], references: [id])
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([userId, marketId])
+}
+
+model Order {
   id            String      @id @default(uuid())
   userId        String
   marketId      String
   orderType     OrderType
   orderSide     OrderSide
-  price         String
-  slippage      Int
+  price         String?
+  slippage      Int?
   qty           String
-  filledQty     String
-  initialMargin String
-  status        OrderStatus
+  filledQty     String      @default("0")
+  initialMargin String      @default("0")
+  lockedMargin  String      @default("0")
+  status        OrderStatus @default(OPEN)
+  timeInForce   TimeInForce
+  reduceOnly    Boolean     @default(false)
 
-  maker_fills fill[] @relation("maker")
-  taker_fills fill[] @relation("taker")
+  market        Market      @relation(fields: [marketId], references: [id])
+  user          User        @relation(fields: [userId], references: [id])
 
-  user User @relation(fields: [userId], references: [id])
+  maker_fills   Fill[]      @relation("maker")
+  taker_fills   Fill[]      @relation("taker")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt 
+
+  @@index([userId])
+  @@index([marketId, status])
 }
 
-model fill {
+model Fill {
   id             String   @id @default(uuid())
+  marketId       String
+  price          String
+  qty            String
+
   maker_id       String
   taker_id       String
-  qty            String
-  price          String
   maker_order_id String
   taker_order_id String
-  marketId       String
+
+  makerFee       String   @default("0")
+  takerFee       String   @default("0")
+
+  market         Market   @relation(fields: [marketId], references: [id])
+  maker          User     @relation("maker_fills", fields: [maker_id], references: [id])
+  taker          User     @relation("taker_fills", fields: [taker_id], references: [id])
+  maker_order    Order    @relation("maker", fields: [maker_order_id], references: [id])
+  taker_order    Order    @relation("taker", fields: [taker_order_id], references: [id])
+
   createdAt      DateTime @default(now())
 
-  // Relationship with User
-  maker User @relation("maker_fills", fields: [maker_id], references: [id])
-  taker User @relation("taker_fills", fields: [taker_id], references: [id])
-
-  // Relationship with Order
-  taker_order order @relation("taker", fields: [taker_order_id], references: [id])
-  maker_order order @relation("maker", fields: [maker_order_id], references: [id])
-}
-
-enum OrderStatus {
-  Filled
-  Open
-  PartiallyFilled
-  Cancelled
-}
-
-enum OrderSide {
-  Bid
-  Ask
-}
-
-enum OrderType {
-  market
-  Limit
+  @@index([marketId, createdAt])
+  @@index([maker_id])
+  @@index([taker_id])
 }
