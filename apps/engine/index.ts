@@ -10,102 +10,186 @@ await Promise.all([
     publisher.connect(),
 ]);
 
-//const clientRead = createClient();
-
-////clientRead.connect(); // redis client is created 
-
-//const publisher = createClient();
-
-//publisher.connect();
-
-//client.xGroupCreate("engine"  , "engine" , "$" , { // we are creatig a consumer gropu here 
-
-//     MKSTREAM :true // this is make the stream form the engine once this runs 
-// }) // this was a one time thing 
-
-// try{
-
-//     await clientRead.xGroupCreate(
-//         "engine","engine","0", {MKSTREAM : true});
-    
-// }catch(error){
-
-//     if( 
-//         !(error instanceof Error) || 
-//         !error.message.includes("BUSYGROUP")
-//     ){
-//         throw error ; 
-//     }
-// }
+const STREAM_KEY = "engine";
+const ENGINE_GROUP = "engine-consumer-group";
+const CONSUMER_NAME= "engine-worker-1";
 
 
-type openOrder = {
+try {
 
-    userId : string,
-    originalOrderId : string,
-    filledQty : string ,
-    Qty : string
+    await clientRead.xGroupCreate(STREAM_KEY,ENGINE_GROUP,"0",{
+
+        MKSTREAM : true,
+    });
 }
-type Bid ={
-    availableQty : number ,
-    openOrders : []
-}
-type Ask ={
+catch(error : any){ 
 
-    availbleQty : number , 
-    openOrder : []
+  if (!error?.message?.includes("BUSYGROUP")) { // this signify that the group that the group is already been created 
+    throw error;
+  }
+}
+ // this part initilaises the queue if not already created 
+
+type OpenOrder = {
+    userId : string ;
+    originalOrderId : string;
+    filledQty : string ;
+    qty : string;
+}
+ type PriceLevel = {
+
+    totalQty : string;
+    orders : OpenOrder[];
+ }
+
+interface OrderBook {
+    bids : Map<string , PriceLevel> ;
+    asks : Map <string ,PriceLevel>;
+    lastTradedPrice : number ;
+    marketId : string ;
+    symbol : string;
 }
 
-interface orderBook {
-    bids : Map<string , Bid> , 
-    asks : Map <string ,Ask>,
-    lastTradedPrice : number ,
-    marketId : string 
-}
 
-const orderBook  : orderBook[] =  [] ; 
+
+const orderBook  = new Map<string , OrderBook>() ; 
 
 const Balances : Map<string, {available_bal:string , locked_bal:string}>  = new Map();
 
 console.log("engine has started"); 
 
 
-while(1){
+while(true){
 
-    const response = await clientRead.xReadGroup("engine" // this is the consumer group name 
-    , "engine" // this is the stream mw we read from 
+    try {
+
+    const response = await clientRead.xReadGroup(
+    ENGINE_GROUP, // this is the consumer group name  
+    CONSUMER_NAME // this is the stream/worker we read from 
      , [{
 
-        key :"engine" ,
-        id : ">"
+        key :"engine" , // the redis stream key to consume  from 
+        id : ">" // this tell us that give only msg that are recent 
     }], {
-        BLOCK:0,
-        COUNT :1
+        BLOCK:0, // waits unitl a new query drops 
+        COUNT :1 // reads one query at a time 
     }
-)
+);
 
-if(!response){
+if(!response || !response[0]?.messages[0]){
 
     console.log("nothing found in the queue broo  bad luck ig ");
     continue; 
 } 
 
-const entry = response[0]?.messages[0];
+//this is the message that is the complete entry message published by redis 
+const  entry = response[0]?.messages[0];
 
 if(!entry) continue ; 
 
 console.log("engine req is reaching here ")
 
-const message : {loopbackId : string } & toEngine = entry.message;
+// destructuring this way cuz we strified the redis response 
+const loopBackId = entry.message.loopbackId; 
+const command : toEngine = JSON.parse(entry.message.payload); //
+
+
+//const message : {loopbackId : string } & toEngine = entry.message;
 
 console.dir(response, { depth: null });
 
-if(message.messageType == "create_market"){
+if(command.messageType == "CREATE_ORDER"){
+    // destructuring the requied payload here 
+   const{userId , orderId , marketId , qty , price , orderType , side , leverage} = command; 
 
 
-    //check if the order book for that market exists 
+   const book = orderBook.get(marketId);
 
-    const existingbook = orderBook.find(
+   if(!book){
+
+    await publisher.xAdd("to-backend" , "*", {
+
+        loopBackId,
+        status : "REJECTED",
+        data : "",
+        error : "MARKET_NOT_FOUND_BRO"
+
+    });
+   
+  // to avoid reprocessing or publishing this entry here 
+   await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+   continue;
+}
+
+// we here extract the user balnce and all other things that are required to destructured 
+const userBalance = Balances.get(userId) ?? {available_bal : "0" , locked_bal : "0"};
+const numQty = parseFloat(qty);
+// here we infer what type of price does the user wants as its a limit price or market price 
+const numPrice = price ? parseFloat(price) : book.lastTradedPrice; 
+
+
+if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
+
+    await publisher.xAdd("to-engine", "*" ,{
+   loopBackId , 
+   status : "REJECTED",
+   data : "",
+   error: "INVAILD_PRICE_OR_QTY"
+    } ); 
+
+    await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+    continue; 
+}
+const userLeverage = command.leverage ? parseFloat(leverage) : 1 ;  
+
+const reqMargin = command.reduceOnly ? 0 : ((numQty * numPrice)/userLeverage);
+
+const currentAvailBalance = parseFloat(userBalance.available_bal) ; 
+
+
+if(currentAvailBalance < reqMargin){
+
+    await publisher.xAdd("to-backend" , "*", {
+
+        loopBackId , 
+        status : "REJECTED" ,
+        Data : "" ,
+        error : "INVAILD_AVAILABLE_BAL_BROO"
+    }); 
+
+    await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+    continue ; }
+
+    Balances.set(userId , {
+
+        available_bal : ( currentAvailBalance - reqMargin).toString(),
+        locked_bal : (parseFloat(userBalance.locked_bal)+reqMargin).toString(),
+
+    });
+
+    // now the balacnece has been locked for the user 
+    
+    const remaningQty = numQty ; 
+
+    
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+    const existingbook = orderBook.get(
         (book) => book.marketId === message.marketId
     );
 
@@ -181,4 +265,7 @@ if(message.messageType == "")
 
 
 
-}
+}catch(err){
+
+        console.error("[Engine Consumer Error]:" , err);
+    }

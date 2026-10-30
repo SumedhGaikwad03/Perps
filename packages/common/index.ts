@@ -48,6 +48,8 @@ export type toEngine =  {
 
     orderType : OrderType ,
 
+    leverage : string , 
+
 
     timeInForce : TimeInForce,
 

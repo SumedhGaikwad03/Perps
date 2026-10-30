@@ -25,7 +25,9 @@ async function initializeRedis(){
     ]);
 
 try {
-await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP , "$" ,
+    //here we are are creating a stram to-backed and with the name of consumer group and $ says that just 
+    // send msg form this point of time 
+await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP , "$" , 
     {
         MKSTREAM :true 
     }
