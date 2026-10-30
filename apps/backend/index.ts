@@ -2,21 +2,17 @@
 import express, { response } from 'express';
 import { prisma } from 'db'; // or your custom db import
 import jwt from "jsonwebtoken";
-
 import {authmiddleware} from "./authMiddleware";
-
 import {createClient} from "redis"; 
 import { loopback } from './loopback';
+import { concatArrayBuffers, Image } from 'bun';
 
 const client = createClient();
-
 client.connect(); 
 
-
-
 const app = express();
-
 app.use(express.json()); // Essential for parsing JSON bodies in POST requests
+
 
 app.post('/api/v1/signup', async (req, res) => {
 
@@ -27,20 +23,31 @@ app.post('/api/v1/signup', async (req, res) => {
             return res.status(400).json({ error: "Username  and password are required" });
         }
 
+        const hashPassword = await Bun.password.hash(password);
+
+
+
 
 
         const response = await prisma.user.create({
             data: {
                 username: username,
-                password: password
-            }
+                password: hashPassword,
+                wallet : {
+                   create : {
+                      amountAvail : "0",
+                      amountLocked : "0",
+                   },
+                },
+            },
 
-        })
+        });
 
         res.status(201).json({
 
-            id: response.id
-        })
+            id: response.id ,
+            message :"You have created an id here "
+        }); 
     }
 
     catch (e) {
@@ -53,7 +60,7 @@ app.post('/api/v1/signup', async (req, res) => {
 
 
 
-})
+});
 
 app.post('/api/v1/signin' , async (req , res) => {
 
@@ -68,24 +75,28 @@ app.post('/api/v1/signin' , async (req , res) => {
 
         }
 
-        const response =await prisma.user.findFirst({
+
+
+        const User  =await prisma.user.findUnique({
 
             where :{
-                username : username ,
-                password : password 
-            }
-        })
-
-        if(!response){
-
-            console.log("Invalid credentials for user: " , username);
-
-            res.status(401).json({error : "Invaild credtials"});
-            return; 
+                username : username 
+            },
+        });
 
 
+        if(!User){
+            res.status(401).json({message : "This user does not exists broo "});
         }
 
+
+        const isPasswordVaild = await Bun.password.verify(password,User!.password);
+
+        if(!isPasswordVaild){
+            return res.status(401).json({message : "The password or username  is wrong brooo "})
+        }
+
+       
         const secret = process.env.JWT_SECRET;
 
         if(!secret){
@@ -93,80 +104,82 @@ app.post('/api/v1/signin' , async (req , res) => {
         }
 
       const token = jwt.sign({
-        userId: response.id
-      }, secret, {expiresIn : '1h'});
+        userId: User!.id,}, 
+        secret, 
+        {expiresIn : '1h'});
 
       return res.status(200).json({
 
-        id : response.id,
+        id : User!.id,
         token,
-      }
-      ); 
-
-
-    }
+      });  
+     }
     catch (e) {
         console.error(e);
-
-                res.status(500).json({ error: "Internal Server Error", details: String(e) });
-
+       res.status(500).json({ error: "Internal Server Error", details: String(e) });
     }
- 
     });
 
 
     app.post('/api/v1/admin/market' , async ( req , res ) => {
 
-        const {symbol  , imgUrl} = req.body;   
 
-        const token = req.headers.token;
-        
-        console.log(token); 
-        console.log(process.env.ADMIN_SECRET); 
-        if(token != process.env.ADMIN_SECRET){
+        try { 
 
-            res.status(403).json({
-                message: " this token is invaild broo "
-            })
-            return ; 
+        const {symbol ,slug  , imgUrl , } = req.body;   
+
+
+        if(!symbol ||  !slug || !imgUrl){
+
+            res.status(401).json({message : "The body is for request is empty "});
         }
 
-        const response  = await prisma.market.create({
+
+
+        const token = req.headers.token; 
+
+         if(!token){
+            res.status(401).json({message : "The body is for request is empty "});
+        }
+        console.log(token); 
+        console.log(process.env.ADMIN_SECRET); 
+        if(token != process.env.ADMIN_SECRET){ 
+        return res.status(403).json({ message: " this token is invaild broo"});
+      }
+
+      const response  = await prisma.market.create({
 
             data : {
-
-                slug : symbol ,
-                imgUrl : imgUrl ,
+                slug : symbol,
+                symbol : symbol,
+                imgUrl : imgUrl || null,
             }
-        })
+        });
 
-        // const queryResponse = await client.xAdd("engine-queue" , "*" , {
-
-        //     type : "create_market",
-        //     marketId : response.id 
-        // }); // this query is not needed here we have migated to use loppback for this 
-
-
-        // we have to define an loop back intrepted here that would define  if the in memeroy response are in place 
-        // need a loop back engine for this task 
 
         const queuedLoopbackResponse = await loopback({
 
-            messageType: "create_market", 
+            messageType: "CREATE_MARKET", 
             marketId : response.id,
-            imageUrl : response.imgUrl,
+            imageUrl : response.imgUrl || "",
             symbol : response.slug
         });  
 
 
 
 
-        res.json({id:response.id ,
-            message :  " well done market is created bro "})
+        return res.json({id:response.id , message :  " well done market is created bro " ,
+             engineStatus : queuedLoopbackResponse}) ; 
 
+        }
+        catch(error : any ){ 
 
+            console.error("Admin create market error:", error);
+            return res.status(500).json({ error: "Internal Server Error", details: String(error) });
+        
+        }
 
-    })
+ });
 
 
     app.post('/api/v1/onRamp' ,authmiddleware , async ( req , res) => { 
