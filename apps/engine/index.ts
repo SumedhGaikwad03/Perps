@@ -130,7 +130,7 @@ const numPrice = price ? parseFloat(price) : book.lastTradedPrice;
 
 if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
 
-    await publisher.xAdd("to-engine", "*" ,{
+    await publisher.xAdd("to-backend", "*" ,{
    loopBackId , 
    status : "REJECTED",
    data : "",
@@ -153,7 +153,7 @@ if(currentAvailBalance < reqMargin){
 
         loopBackId , 
         status : "REJECTED" ,
-        Data : "" ,
+        data : "" ,
         error : "INVAILD_AVAILABLE_BAL_BROO"
     }); 
 
@@ -167,11 +167,117 @@ if(currentAvailBalance < reqMargin){
 
     });
 
-    // now the balacnece has been locked for the user 
+    // now the balacnece has been locked for the user , we now have to make the matching engine / work the matching engine 
     
-    const remaningQty = numQty ; 
+    // this is the quantity that is still left to be filled 
+    let  remaningQty = numQty ;  
 
+    const fills : Array<{
     
+    price : string ,
+    
+    qty :string , 
+    //maker is the one who we swap with as he is the one that makes the fills possible 
+    makerOrderId : string 
+    
+    makerUserId : string }> = [];
+
+    // we extract the type of order and then also find the matching sode that we would swap our order with 
+    const isBid = side === "BID";  
+
+    const opposingBook = isBid ? book.asks : book.bids ; 
+
+
+    const sortedPrices = Array.from(opposingBook.keys()).sort((a,b) => {
+
+        // if our bid is true we sort the prices in ascending as ask are sorted ascending and bids are sorts decending 
+
+        return isBid ? parseFloat(a)-parseFloat(b) : parseFloat(b)-parseFloat(a) 
+    }); 
+
+    for(const priceKey of sortedPrices) {
+
+        if(remaningQty <=0){
+            break;
+        } 
+
+     const levelPrice = parseFloat(priceKey) ;
+
+
+
+     if(orderType === "LIMIT"){
+
+        // at limit orders the best price for each table is defined as 
+        if(isBid && levelPrice >  numPrice) break;  // ask price is greater 
+        if(!isBid && levelPrice < numPrice)break ; // bid price is greater 
+     }
+
+     // is all is set for limit or simply the order is for market then 
+
+     const priceLevel = opposingBook.get(priceKey); //pull the the entrie order for this price key 
+
+     // time to fill the order one at a time like this 
+
+     while(priceLevel?.orders.length!> 0 && remaningQty > 0) {
+
+        // have to walk the order book to satifiy the orders we have injested  
+
+        // we extract the first order form the book 
+
+        const restingOrder = priceLevel?.orders[0] ; 
+
+        const restingOrderRemaning = parseFloat(restingOrder?.qty!) - parseFloat(restingOrder?.filledQty!);
+
+
+        const matchQty = Math.min(remaningQty , restingOrderRemaning); // as we extract how much of the quantoty could be matched here 
+
+        fills.push({
+
+            price : priceKey , 
+            qty : matchQty.toString(),
+            makerOrderId : restingOrder?.originalOrderId!,
+            makerUserId :  restingOrder?.userId!
+         }) ; 
+
+         restingOrder!.filledQty =(parseFloat(restingOrder!.filledQty)+matchQty).toString(); // this is the updation in the restig order 
+
+         remaningQty -=  matchQty; // this is the updation in the user remaing qty  
+
+         // now the reduce  the volume at the sitting order here 
+
+         priceLevel!.totalQty = (parseFloat(priceLevel?.totalQty!)-matchQty).toString();
+
+
+         // if the entire order is filled then we have to dequee that order 
+
+         if(parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty)){ 
+
+            priceLevel?.orders.shift();
+            } 
+
+     // if all the oders at the order book are eaten then we delete that price level 
+        if(priceLevel?.orders.length== 0 ){
+
+            opposingBook.delete(priceKey); 
+        } 
+    }
+        
+        // update the last traded price with the most reeint fills in the table 
+
+        if(fills.length> 0 ){
+
+            book.lastTradedPrice = parseFloat(fills[fills.length-1]!.price);
+        }
+
+
+
+         } 
+    
+
+
+
+
+
 
 
 
@@ -189,83 +295,83 @@ if(currentAvailBalance < reqMargin){
 
 
 
-    const existingbook = orderBook.get(
-        (book) => book.marketId === message.marketId
-    );
+//     const existingbook = orderBook.get(
+//         (book) => book.marketId === message.marketId
+//     );
 
-    if(existingbook){
-        console.log("order book already exists with this id : " , existingbook.marketId)
-    }
-    else{
+//     if(existingbook){
+//         console.log("order book already exists with this id : " , existingbook.marketId)
+//     }
+//     else{
 
-     const createdbook = {
+//      const createdbook = {
 
-        bids : new Map(),
-        asks : new Map(),
-        lastTradedPrice : -1 ,
-        marketId : message.marketId
+//         bids : new Map(),
+//         asks : new Map(),
+//         lastTradedPrice : -1 ,
+//         marketId : message.marketId
 
 
-    }
+//     }
 
-    orderBook.push(createdbook);
+//     orderBook.push(createdbook);
 
-    console.log("orderbook created as ");
-console.dir(createdbook , {depth : null });
+//     console.log("orderbook created as ");
+// console.dir(createdbook , {depth : null });
 
-  }
+//   }
 
-    await publisher.xAdd("to-backend", "*" , {
+//     await publisher.xAdd("to-backend", "*" , {
 
-    loopbackId: message.loopbackId ,
-    // this tell that this id has been processed 
-    result : JSON.stringify({success :true})
-});
+//     loopbackId: message.loopbackId ,
+//     // this tell that this id has been processed 
+//     result : JSON.stringify({success :true})
+// });
 
   
-await clientRead.xAck(
-    "engine",
-    "engine",
-    entry.id
-);
+// await clientRead.xAck(
+//     "engine",
+//     "engine",
+//     entry.id
+// );
 
 
 
-}
-if(message.messageType == "onRamp") {
+// }
+// if(message.messageType == "onRamp") {
 
-    const balance = Balances.get(message.userId) ?? {
+//     const balance = Balances.get(message.userId) ?? {
 
-        available_bal: "0" ,
-        locked_bal : "0" 
-    }; // we retirivied the user balances 
+//         available_bal: "0" ,
+//         locked_bal : "0" 
+//     }; // we retirivied the user balances 
 
-    Balances.set(message.userId , { ...balance , available_bal : String(Number(balance.available_bal) + Number(message.amount))});
+//     Balances.set(message.userId , { ...balance , available_bal : String(Number(balance.available_bal) + Number(message.amount))});
 
-    // this need to update the user balance in the system 
-    // this upadates the balance in the ram 
-await publisher.xAdd("to-backend", "*" , {
+//     // this need to update the user balance in the system 
+//     // this upadates the balance in the ram 
+// await publisher.xAdd("to-backend", "*" , {
 
-    loopbackId: message.loopbackId, // this tell that this id been processed 
-    result : JSON.stringify({success : true})
-})
+//     loopbackId: message.loopbackId, // this tell that this id been processed 
+//     result : JSON.stringify({success : true})
+// })
 
-await clientRead.xAck(
-    "engine",
-    "engine",
-    entry.id
-); // this removes the msg form the plending entries list but the logs still persist 
+// await clientRead.xAck(
+//     "engine",
+//     "engine",
+//     entry.id
+// ); // this removes the msg form the plending entries list but the logs still persist 
 
-}
-//  now to publish the msg to the the other queue we need to publish the meassage 
+// }
+// //  now to publish the msg to the the other queue we need to publish the meassage 
 
-if(message.messageType == "")
-
-
+// if(message.messageType == "")
 
 
 
-}catch(err){
 
-        console.error("[Engine Consumer Error]:" , err);
-    }
+
+// }catch(err){
+
+//         console.error("[Engine Consumer Error]:" , err);
+//     }
