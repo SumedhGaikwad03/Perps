@@ -126,10 +126,10 @@ app.post('/api/v1/signin' , async (req , res) => {
 
         try { 
 
-        const {symbol ,slug  , imgUrl , tickSize , stepSize  } = req.body;   
+        const {symbol ,slug  , imgUrl , tickSize = "0.1 " , stepSize = "0.001"} = req.body;   
 
 
-        if(!symbol ||  !slug || !tickSize || !stepSize  ){
+        if(!symbol ||  !slug){
 
             res.status(401).json({message : "The body is for request is not complete bro  "});
         }
@@ -153,6 +153,8 @@ app.post('/api/v1/signin' , async (req , res) => {
                 slug : symbol,
                 symbol : symbol,
                 imgUrl : imgUrl || null,
+                tickSize : tickSize , 
+                stepSize : stepSize,
             }
         });
 
@@ -161,14 +163,13 @@ app.post('/api/v1/signin' , async (req , res) => {
 
             messageType: "CREATE_MARKET", 
             marketId : response.id,
-            imageUrl : response.imgUrl || "",
-            symbol : response.slug
-        });  
-
-
-
-
-        return res.json({id:response.id , message :  " well done market is created bro " ,
+            imgUrl : response.imgUrl || "",
+            symbol : response.symbol,
+            slug :  response.slug,
+            tickSize : tickSize ,
+            stepSize : stepSize , 
+        }); 
+         return res.json({id:response.id , message :  " well the market request has arrived as  " ,
              engineStatus : queuedLoopbackResponse}) ; 
 
         }
@@ -189,7 +190,7 @@ app.post('/api/v1/signin' , async (req , res) => {
         console.log("req has reached loopback ");
         const queuedLoopbackResponse = await loopback({
 
-            messageType: "onRamp",
+            messageType: "ON_RAMP",
             amount : req.body.amount.toString(),
             userId: userId 
         }
@@ -207,30 +208,30 @@ app.post('/api/v1/signin' , async (req , res) => {
         }); 
     });
 
-    app.post('/api/v1/orders' , authmiddleware , (req , res ) => { 
+    // app.post('/api/v1/orders' , authmiddleware , (req , res ) => { 
 
 
 
-        const userId : string = req.userId! ; // extacting the user id here 
-        // from the middle ware 
+    //     const userId : string = req.userId! ; // extacting the user id here 
+    //     // from the middle ware 
 
-        console.log("request has reached here "); 
+    //     console.log("request has reached here "); 
 
-        const loopbackResponse = await loopback({
+    //     const loopbackResponse = await loopback({
 
-            messageType : "create_order_bid"
-            qyt : 
+    //         messageType : "create_order_bid"
+    //         qyt : 
 
 
-        })
-
-        
+    //     })
 
         
 
+        
 
 
-    }); 
+
+    // }); 
 
 
 

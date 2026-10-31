@@ -28,6 +28,8 @@ export type toEngine =  {
 
     imgUrl? : string,
 
+    slug : string , 
+
     symbol : string ,
 
     tickSize : string , 

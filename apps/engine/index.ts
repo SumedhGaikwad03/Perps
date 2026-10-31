@@ -1,6 +1,6 @@
 import {createClient} from "redis"; 
 
-import type {toEngine} from "common" ; 
+import type {orderSide, toEngine} from "common" ; 
 
 
 const clientRead = createClient();
@@ -48,12 +48,15 @@ interface OrderBook {
     lastTradedPrice : number ;
     marketId : string ;
     symbol : string;
+    tickSize : string,
+    stepSize : string,
 }
 
 
-
+// this is a master register that keeps all the order books within itself 
 const orderBook  = new Map<string , OrderBook>() ; 
 
+// this is the master register for balances to keep all the balances for the users 
 const Balances : Map<string, {available_bal:string , locked_bal:string}>  = new Map();
 
 console.log("engine has started"); 
@@ -90,8 +93,9 @@ if(!entry) continue ;
 console.log("engine req is reaching here ")
 
 // destructuring this way cuz we strified the redis response 
+//command is the object that we just untangled 
 const loopBackId = entry.message.loopbackId; 
-const command : toEngine = JSON.parse(entry.message.payload); //
+const command : toEngine = JSON.parse(entry.message.payload); 
 
 
 //const message : {loopbackId : string } & toEngine = entry.message;
@@ -409,6 +413,49 @@ if(currentAvailBalance < reqMargin){
         // its done BRO ;)
 }
 
+if(command.messageType == "CREATE_MARKET"){ 
+
+     // we are extracting the market here 
+    const {symbol ,tickSize , stepSize  , marketId} = command ;  
+
+    // we have to check if the duplicate market even exist 
+
+    if(orderBook.has(marketId)){
+
+        await publisher.xAdd("to-backend" , "*", {
+
+            loopBackId , 
+            status : "REJECTED",
+            data : "",
+            error : "MARKET_ALREADY_EXISTS"
+        });
+
+        // we ack the req as this req has been processed 
+        await publisher.xAck(STREAM_KEY, ENGINE_GROUP,entry.id);
+
+        continue;
+    }
+
+    // now we have vaildated  that the engine exists then we move ahead and create an orderbook 
+
+    const newBook : OrderBook  = {
+
+        marketId, 
+        symbol,
+        lastTradedPrice : 0,
+        tickSize ,
+        stepSize,
+        bids : new Map <string , PriceLevel >(),
+        asks : new Map <string , PriceLevel>(),
+};
+
+orderBook.set(marketId,newBook); 
+
+}
+
+
+
+
 
 
 
@@ -495,7 +542,8 @@ if(currentAvailBalance < reqMargin){
 
 
 
-// }catch(err){
+ }catch(err){
 
-//         console.error("[Engine Consumer Error]:" , err);
-//     }
+         console.error("[Engine Consumer Error]:" , err);
+    }
+}
