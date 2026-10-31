@@ -271,22 +271,136 @@ if(currentAvailBalance < reqMargin){
 
 
 
-         } 
-    
+         }
+
+         // this is now the post matching logic 
+
+         let finalStatus :  "FILLED" | "PARTIALLY_FILLED" | 'OPEN' = "FILLED" ; 
+
+         const exuctedQty = numQty - remaningQty ; // this is the amount that is still left to be executed 
+
+         if(remaningQty > 0 ){
+             
+            //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist 
+            if(orderType === "LIMIT" ){
+
+                finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN"
+
+                 // all the unfinished limit order must sit on the same side of the order book for all
+             const targetSide = isBid? book.bids : book.asks ; 
+              
+             // this is the price that the order was places upon 
+            const restingPrice = price!; 
+
+            // get all the orders at the that level & we add volume to that level 
+            let  level = targetSide.get(restingPrice); 
+
+            if(!level){
+            // if current price level does not exist then we create our own price 
+                level ={
+                totalQty : "0",
+                orders : [],
+            }
+            };
+            //pushing our order to the level that was needed 
+            level.orders.push({
+            userId , 
+            originalOrderId : orderId ,
+            qty : numQty.toString(),
+            filledQty : exuctedQty.toString()
+
+            }); 
+
+            //updating the depth of the order for that level 
+            level.totalQty = (parseFloat(level.totalQty)+remaningQty).toString()
 
 
+          }else if (orderType === "MARKET"){
+
+            finalStatus  = exuctedQty  > 0 ? "PARTIALLY_FILLED" : "OPEN"   
+
+            // calculate collateral locked for unfullfiled portain  
+
+            const unusedMargin = command.reduceOnly ? 0 : (remaningQty * numPrice)/userLeverage; 
 
 
+            if(unusedMargin > 0 ){
+
+                const latestBalance = Balances.get(userId); 
+
+                Balances.set(userId , {
+                    available_bal : (parseFloat(latestBalance!.available_bal)+unusedMargin).toString() , 
+                    locked_bal : (parseFloat(latestBalance!.locked_bal) - unusedMargin).toString()
+
+                });
+
+                    
+                } 
+            }
 
 
+          } 
 
+          // if the the fills happens at a better price than the price specifoed then 
 
+          if(fills.length>0 && !command.reduceOnly){
 
+            const totalActualSpend = fills.reduce(
 
+                (sum,f) => sum +  (parseFloat(f.qty)* parseFloat(f.price))/userLeverage , 0)
+            
+          
 
+          const expectedSpent = (exuctedQty * numPrice)/userLeverage ; 
 
+          const priceImprovementRefund = expectedSpent - totalActualSpend ; 
 
+          if(priceImprovementRefund > 0 ){
 
+            const latestBalance = Balances.get(userId); 
+
+            Balances.set(userId , {
+
+                available_bal : (parseFloat(latestBalance!.available_bal)+priceImprovementRefund).toString(),
+                locked_bal : (parseFloat(latestBalance!.locked_bal) - priceImprovementRefund).toString()
+            });
+          }
+        }
+        // the full order is now completed its order 
+
+        await publisher.xAdd("to-backend" , "*", {
+
+            loopBackId , 
+            status : "SUCCESS" ,
+            data : JSON.stringify({
+              orderId , 
+              marketId , 
+              status : finalStatus ,
+              exuctedQty : exuctedQty.toString(),
+              remaningQty : remaningQty.toString(),
+              fills 
+            }) ,
+
+            error :" "
+
+        });
+
+        // now  for db persistance what we can do is 
+
+        if(fills.length > 0 ){
+
+            // we would add a seprate worker to make the db calls possible 
+            await publisher.xAdd("db-events" , "*" , {
+              eventType : "TRADE-EXECUTED",
+              payload : JSON.stringify({
+                takerOrderId : orderId ,
+                takerUserId :  userId , 
+                marketId , 
+                fills 
+              })
+            });
+        }
+        // now the create order endpoint is finally done 
 }
 
 

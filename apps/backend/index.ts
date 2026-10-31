@@ -121,7 +121,7 @@ app.post('/api/v1/signin' , async (req , res) => {
     });
 
 
-    app.post('/api/v1/admin/market' , async ( req , res ) => {
+    app.post('/api/v1/admin/market' , authmiddleware ,async ( req , res ) => {
 
 
         try { 
