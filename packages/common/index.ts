@@ -1,7 +1,7 @@
 // lets start to make the common types in the engine and the data base for communication 
 
 
-export type OrderSide = "BID" | "ASK" 
+export type orderSide = "BID" | "ASK" 
 export type TimeInForce = "GTC" | "FOK" 
 
 export type OrderType = "LIMIT" | "MARKET"
@@ -26,9 +26,13 @@ export type toEngine =  {
 
     marketId : string ,
 
-    imageUrl : string,
+    imgUrl? : string,
 
-    symbol : string 
+    symbol : string ,
+
+    tickSize : string , 
+
+    stepSize : string
 
 }
 
@@ -51,9 +55,9 @@ export type toEngine =  {
     leverage : string , 
 
 
-    timeInForce : TimeInForce,
+    timeInForce : TimeInForce ,
 
-    side : OrderSide,  
+    side : orderSide ,  
 
     reduceOnly : boolean , 
 

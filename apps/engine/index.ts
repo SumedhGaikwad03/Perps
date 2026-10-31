@@ -197,18 +197,20 @@ if(currentAvailBalance < reqMargin){
 
     for(const priceKey of sortedPrices) {
 
+        // THIS LOOP WILL KEEP ON FILLING ORDER UNITL THE REMANING QTY IS ZERO OR THREE ARE NO SUTABLE ORDERS TO SWAP AGAINST 
+
         if(remaningQty <=0){
             break;
         } 
 
-     const levelPrice = parseFloat(priceKey) ;
+     const levelPrice = parseFloat(priceKey) ; // WE HAVE THE CURRENT BEST PRICE 
 
 
 
      if(orderType === "LIMIT"){
 
         // at limit orders the best price for each table is defined as 
-        if(isBid && levelPrice >  numPrice) break;  // ask price is greater 
+        if(isBid && levelPrice >  numPrice) break;  // ask price is greater than num price that is given to the system by user 
         if(!isBid && levelPrice < numPrice)break ; // bid price is greater 
      }
 
@@ -229,7 +231,8 @@ if(currentAvailBalance < reqMargin){
         const restingOrderRemaning = parseFloat(restingOrder?.qty!) - parseFloat(restingOrder?.filledQty!);
 
 
-        const matchQty = Math.min(remaningQty , restingOrderRemaning); // as we extract how much of the quantoty could be matched here 
+        // as we extract how much of the quantoty could be matched here 
+        const matchQty = Math.min(remaningQty , restingOrderRemaning); 
 
         fills.push({
 
@@ -239,7 +242,9 @@ if(currentAvailBalance < reqMargin){
             makerUserId :  restingOrder?.userId!
          }) ; 
 
-         restingOrder!.filledQty =(parseFloat(restingOrder!.filledQty)+matchQty).toString(); // this is the updation in the restig order 
+         // this is the updation in the restig order 
+
+         restingOrder!.filledQty =(parseFloat(restingOrder!.filledQty)+matchQty).toString();  
 
          remaningQty -=  matchQty; // this is the updation in the user remaing qty  
 
@@ -273,7 +278,7 @@ if(currentAvailBalance < reqMargin){
 
          }
 
-         // this is now the post matching logic 
+         // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over 
 
          let finalStatus :  "FILLED" | "PARTIALLY_FILLED" | 'OPEN' = "FILLED" ; 
 
@@ -400,8 +405,13 @@ if(currentAvailBalance < reqMargin){
               })
             });
         }
-        // now the create order endpoint is finally done 
+        // now the create order endpoint is finally done bro 
+        // its done BRO ;)
 }
+
+
+
+
 
 
 

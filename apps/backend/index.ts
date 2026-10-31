@@ -126,12 +126,12 @@ app.post('/api/v1/signin' , async (req , res) => {
 
         try { 
 
-        const {symbol ,slug  , imgUrl , } = req.body;   
+        const {symbol ,slug  , imgUrl , tickSize , stepSize  } = req.body;   
 
 
-        if(!symbol ||  !slug || !imgUrl){
+        if(!symbol ||  !slug || !tickSize || !stepSize  ){
 
-            res.status(401).json({message : "The body is for request is empty "});
+            res.status(401).json({message : "The body is for request is not complete bro  "});
         }
 
 
