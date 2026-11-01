@@ -3,6 +3,7 @@ import {createClient} from "redis";
 import type {orderSide, toEngine} from "common" ; 
 
 
+// we iniataire two instances that would read and publish the message for this stream 
 const clientRead = createClient();
 const publisher = createClient();
 await Promise.all([
@@ -16,6 +17,7 @@ const CONSUMER_NAME= "engine-worker-1";
 
 
 try {
+    // we create am engine group if not already created 
 
     await clientRead.xGroupCreate(STREAM_KEY,ENGINE_GROUP,"0",{
 
@@ -24,17 +26,17 @@ try {
 }
 catch(error : any){ 
 
-  if (!error?.message?.includes("BUSYGROUP")) { // this signify that the group that the group is already been created 
-    throw error;
+  if (!error?.message?.includes("BUSYGROUP")) { 
   }
 }
- // this part initilaises the queue if not already created 
-
+ 
+// these are the types that we use through out the code base 
 type OpenOrder = {
     userId : string ;
     originalOrderId : string;
     filledQty : string ;
     qty : string;
+    leverage : string;
 }
  type PriceLevel = {
 
@@ -68,7 +70,8 @@ while(true){
 
     const response = await clientRead.xReadGroup(
     ENGINE_GROUP, // this is the consumer group name  
-    CONSUMER_NAME // this is the stream/worker we read from 
+    CONSUMER_NAME // this is the stream/worker we use to read data from 
+    //message is tagged in the ple with the consumer_name   
      , [{
 
         key :"engine" , // the redis stream key to consume  from 
@@ -85,17 +88,21 @@ if(!response || !response[0]?.messages[0]){
     continue; 
 } 
 
-//this is the message that is the complete entry message published by redis 
+// this is the entrie redis message that is received by the consermerworkr  
 const  entry = response[0]?.messages[0];
 
 if(!entry) continue ; 
 
 console.log("engine req is reaching here ")
 
-// destructuring this way cuz we strified the redis response 
-//command is the object that we just untangled 
+// THE entry message is currently is an strinfied version of the message 
+// we have to destructure it and extract the loopback id of the message 
 const loopBackId = entry.message.loopbackId; 
-const command : toEngine = JSON.parse(entry.message.payload); 
+
+// this has the data that we are supposed to work on 
+const command : toEngine = JSON.parse(entry.message.payload);  
+
+
 
 
 //const message : {loopbackId : string } & toEngine = entry.message;
@@ -107,11 +114,13 @@ if(command.messageType == "CREATE_ORDER"){
    const{userId , orderId , marketId , qty , price , orderType , side , leverage} = command; 
 
 
-   const book = orderBook.get(marketId);
+   const book = orderBook.get(marketId); 
+   // we extact order book from the market   
+
 
    if(!book){
 
-    await publisher.xAdd("to-backend" , "*", {
+    await publisher.xAdd("to-backend" , "*", { 
 
         loopBackId,
         status : "REJECTED",
@@ -139,7 +148,7 @@ if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
    status : "REJECTED",
    data : "",
    error: "INVAILD_PRICE_OR_QTY"
-    } ); 
+    }); 
 
     await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
     continue; 
@@ -244,7 +253,8 @@ if(currentAvailBalance < reqMargin){
             qty : matchQty.toString(),
             makerOrderId : restingOrder?.originalOrderId!,
             makerUserId :  restingOrder?.userId!
-         }) ; 
+            
+         }); 
 
          // this is the updation in the restig order 
 
@@ -311,12 +321,15 @@ if(currentAvailBalance < reqMargin){
                 orders : [],
             }
             };
+
+            
             //pushing our order to the level that was needed 
             level.orders.push({
             userId , 
             originalOrderId : orderId ,
             qty : numQty.toString(),
-            filledQty : exuctedQty.toString()
+            filledQty : exuctedQty.toString(),
+            leverage : userLeverage.toString(),
 
             }); 
 
@@ -431,7 +444,7 @@ if(command.messageType == "CREATE_MARKET"){
         });
 
         // we ack the req as this req has been processed 
-        await publisher.xAck(STREAM_KEY, ENGINE_GROUP,entry.id);
+        await clientRead.xAck(STREAM_KEY, ENGINE_GROUP,entry.id);
 
         continue;
     }
@@ -451,8 +464,240 @@ if(command.messageType == "CREATE_MARKET"){
 
 orderBook.set(marketId,newBook); 
 
+console.log("orderBook has been created for the market ");
+// the orderbook has been created for the  
+
+await publisher.xAdd("to-backend", "*", {
+    loopBackId ,
+    status : "SUCCESS",
+    data : JSON.stringify({
+     marketId,
+     symbol,
+     tickSize,
+     stepSize,
+     status : "INTIATILISED"
+    }),
+     error : "",
+}); 
+
+await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+continue;
+
+
 }
 
+if(command.messageType == "ON_RAMP"){
+
+    const {userId , amount} = command ; 
+
+    // this is the amount that 
+    const numAmount = parseFloat(amount); 
+
+    // now we have to move ahead the as we nw have to amount 
+
+    if(numAmount <=0 || isNaN(numAmount) ){
+    
+        console.log("The amount is too low ");
+
+        await publisher.xAdd("to-backend", "*", {
+
+            loopBackId , 
+            status : "REJECTED",
+            data : "",
+            error : "AMOUNT_IS_TOO_LOW"
+        });
+    
+   
+await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+continue; }
+
+
+const currentBalances = Balances.get(userId) ?? {
+
+    available_bal : "0",
+    locked_bal : "0",
+};
+
+const newBalance = (parseFloat(currentBalances.available_bal) +numAmount).toString();
+
+Balances.set(userId , {
+    available_bal: newBalance , 
+    locked_bal: currentBalances.locked_bal
+});
+
+console.log(`Engine has onrampeed the balances for this userid : ${userId} by  this amount ${numAmount}`);
+
+await publisher.xAdd("to-backend", "*", {
+
+    loopBackId : loopBackId ,
+    status : "SUCCESS", 
+    data : JSON.stringify( {
+      userId ,
+      available_bal : newBalance,
+      locked_bal : currentBalances.locked_bal
+  }) ,
+  error : ""
+
+
+});
+
+await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+continue;
+} 
+
+if(command.messageType == "CANCEL_ORDER"){
+ 
+    // destructing the incoming request 
+    const{userId, marketId , orderId } = command ; 
+
+    // we have to locate the order in the order book 
+
+    const book = orderBook.get(marketId); 
+
+    if(!book){
+
+        await publisher.xAdd("to-backend", "*", {
+            loopBackId , 
+            status : "REJECTED", 
+            data : "",
+            error : "MARKET_DOES_NOT_EXISTS_BRO"
+        }); 
+        await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id); 
+        continue; 
+    }
+
+    let foundOrder : OpenOrder | null = null ;
+
+    let orderPrice : string  | null = null ;
+
+    // the level here basically signifies that lits a sting and array of orders for that price 
+    for(const [priceKey , level ] of book.bids.entries()){
+
+
+// the below map and checks each order if the the order id is matching with the origonal order id or the user id in the system 
+        const idx = level.orders.findIndex(
+
+            (o)=> o.originalOrderId === orderId && o.userId ===userId 
+        );
+
+        // if we find the order in the array of orders that is idx is not -1
+
+        if(idx !== -1){ 
+          
+            foundOrder = level.orders.splice(idx , 1)[0]!; 
+            orderPrice = priceKey ; 
+        
+        // we have now extarcted the order and amount of the order  
+
+      // we have to reduce the voume at the current level 
+        const unExexcutedQty = parseFloat(foundOrder.qty)-parseFloat(foundOrder.filledQty);
+
+        level.totalQty = (parseFloat(level.totalQty)-unExexcutedQty).toString();
+
+        if(level.orders.length == 0){
+            book.bids.delete(priceKey);
+        }
+        break;
+    }
+}
+// now we search asks if we have not found the order in bids 
+
+if(!foundOrder){
+
+    for(const [priceKey , level ] of book.asks.entries()){
+
+
+// the below map and checks each order if the the order id is matching with the origonal order id or the user id in the system 
+        const idx = level.orders.findIndex(
+
+            (o)=> o.originalOrderId === orderId && o.userId ===userId 
+        );
+
+        // if we find the order in the array of orders that is idx is not -1
+
+        if(idx !== -1){ 
+          
+            foundOrder = level.orders.splice(idx , 1)[0]!; 
+            orderPrice = priceKey ; 
+        
+        // we have now extarcted the order and amount of the order  
+
+      // we have to reduce the voume at the current level 
+        const unExexcutedQty = parseFloat(foundOrder.qty)-parseFloat(foundOrder.filledQty);
+
+        level.totalQty = (parseFloat(level.totalQty)-unExexcutedQty).toString();
+
+        if(level.orders.length == 0){
+            book.asks.delete(priceKey);
+        }
+        break;
+    }
+}
+
+
+}
+
+if(!foundOrder || !orderPrice){
+
+    await publisher.xAdd("to-backend", "*", {
+
+        loopBackId , 
+        status : "REJECTED",
+        data : "",
+        error : "THE_ORDER_WAS_NOT_FOUND_OR_FILLED"
+    });
+
+    await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+    continue;
+}
+
+// lets now rerealse the margin to release 
+
+const unfilledQty = parseFloat(foundOrder.qty)-parseFloat(foundOrder.filledQty);
+const leverge =  foundOrder.leverage ? parseFloat(foundOrder.leverage):1;
+const marginToUnlock = (unfilledQty * parseFloat(orderPrice))/leverge; 
+
+const Balance = Balances.get(userId);
+
+if(Balance){
+    const currentAvailBal = parseFloat(Balance.available_bal);
+    const currentLockedBal = parseFloat(Balance.locked_bal);
+
+    Balances.set(userId , {
+        available_bal : (currentAvailBal+marginToUnlock).toString(),
+        locked_bal : Math.max(0,currentLockedBal - marginToUnlock).toString(),
+    });
+}
+
+// all is now set what is left is to notify the backend what is hapning 
+
+await publisher.xAdd("to-backend", "*", {
+    loopBackId ,
+    status : "SUCCESS",
+    data : JSON.stringify({
+        orderId,
+        marketId,
+        status : "CANCELLED",
+        unfilledQty: unfilledQty.toString(),
+
+    }),
+    error : ""
+});
+
+await publisher.xAdd("db-events", "*", {
+
+    eventType : "ORDER_CANCELLED",
+    payload : JSON.stringify({
+        orderId,
+        userId,
+        marketId,
+        status : "CANCELLED"
+    }),
+});
+
+await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+continue;
+}
 
 
 

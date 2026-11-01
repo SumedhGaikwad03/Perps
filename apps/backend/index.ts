@@ -208,30 +208,45 @@ app.post('/api/v1/signin' , async (req , res) => {
         }); 
     });
 
-    // app.post('/api/v1/orders' , authmiddleware , (req , res ) => { 
+    
+    app.delete(`/api/v1/order/:orderId` , authmiddleware , async(req :any   , res) => {
+
+        try {
+         const  userId =req.userId; 
+         const  {orderId} = req.params;
+         const {marketId} = req.body; 
+
+         if(!orderId || !marketId ){
+
+            return res.status(404).json("Market_id or orderId is needed bro");
+
+         }
+
+         const engineReply = await loopback({
+            messageType : "CANCEL_ORDER",
+            userId, 
+            orderId,
+            marketId,
+         });
+
+     // this is the line that executes when the loop back 
+         return res.status(200).json({
+
+            succes : true , 
+            message : "Order cancelled succesfully", 
+            result : engineReply
+         })
 
 
 
-    //     const userId : string = req.userId! ; // extacting the user id here 
-    //     // from the middle ware 
+        }catch(error){
 
-    //     console.log("request has reached here "); 
-
-    //     const loopbackResponse = await loopback({
-
-    //         messageType : "create_order_bid"
-    //         qyt : 
-
-
-    //     })
-
-        
-
-        
-
-
-
-    // }); 
+            console.error("cancelled api order ", error);
+            return res.status(500).json({
+                error : "Internal service error", 
+            }); 
+           }
+    }); 
 
 
 
