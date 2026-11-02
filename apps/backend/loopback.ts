@@ -15,6 +15,7 @@ interface DefferedPromise {
 
     resolve : (value : unknown ) => void ; 
     reject : (reason : unknown) => void ; 
+    timer?: ReturnType<typeof setTimeout>; // we store timeout id here 
 } 
 
 async function initializeRedis(){
@@ -27,7 +28,7 @@ async function initializeRedis(){
 try {
     //here we are are creating a stram to-backed and with the name of consumer group and $ says that just 
     // send msg form this point of time 
-await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP , "$" , 
+await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP , "0" , 
     {
         MKSTREAM :true 
     }
@@ -53,26 +54,35 @@ export function loopback( message : toEngine ) : Promise<unknown> {
     return new Promise( (resolve , reject ) => {
 
 
-        const loopbackId = randomUUIDv7(); // generates a random cryptograpically secure uuid 
+       // // generates a random cryptograpically secure uuid for each redis request cycle 
+        const loopbackId = randomUUIDv7(); 
+
         
-        loopBackResolves.set(loopbackId, {resolve, reject}); // this sorted the  the loopback id that and the resolve  
+        // this is the saving of the loopback id to the map which we later retrive to resolve 
+        loopBackResolves.set(loopbackId, {resolve, reject}); 
+
 
         console.log("loopback resolve this is prior to the resolve "); 
          
-         // add the reques to the queue called engine with the message like loopbackid and all 
-        client.xAdd("engine", "*", {loopbackId , payload: JSON.stringify(message)}) // as this makes redis accept the 
-        // stringfied msg
+         // add the request to the queue called "engine" with the message like loopbackid and all 
+        // as this makes redis accept the stringfied message  
+         client.xAdd("engine", "*", {loopbackId , payload: JSON.stringify(message)}) 
         .then(()=> {
             console.log("request  published succesfully ");
     })
        .catch((error) => {
 
-        loopBackResolves.delete(loopbackId); // if the request go haywire then we delete that id from loopback resolve 
+        // if the request go haywire then we delete that id from loopback resolve 
+        loopBackResolves.delete(loopbackId); 
         reject(error); 
        }); 
-      // loopBackResolves.set(loopbackId,resolve);
+     
 
-      const timer = setTimeout(()=> {
+    const timer = setTimeout(()=> {
+
+        // this block executes code when 10 sec has elapshed then this block is triggerd that resolves the promise created 
+        // the the engine 
+
      const pending = loopBackResolves.get(loopbackId);
 
      if(pending){

@@ -6,6 +6,7 @@ import {authmiddleware} from "./authMiddleware";
 import {createClient} from "redis"; 
 import { loopback } from './loopback';
 import { concatArrayBuffers, Image } from 'bun';
+import { Command } from 'ioredis';
 
 const client = createClient();
 client.connect(); 
@@ -22,13 +23,14 @@ app.post('/api/v1/signup', async (req, res) => {
         if (!username || !password) {
             return res.status(400).json({ error: "Username  and password are required" });
         }
-
+        
+        //hash the password with bun 
         const hashPassword = await Bun.password.hash(password);
 
 
 
 
-
+   // this is db event that stoes the user object in the schema 
         const response = await prisma.user.create({
             data: {
                 username: username,
@@ -86,7 +88,7 @@ app.post('/api/v1/signin' , async (req , res) => {
 
 
         if(!User){
-            res.status(401).json({message : "This user does not exists broo "});
+            return res.status(401).json({message : "This user does not exists broo "});
         }
 
 
@@ -102,11 +104,12 @@ app.post('/api/v1/signin' , async (req , res) => {
         if(!secret){
             throw new Error("JWT_SECRET is not configured");
         }
-
+ 
+     // give user a signed token that is valid for 8h through which all the requests could be vaildated 
       const token = jwt.sign({
         userId: User!.id,}, 
         secret, 
-        {expiresIn : '1h'});
+        {expiresIn : '8h'});
 
       return res.status(200).json({
 
@@ -121,7 +124,7 @@ app.post('/api/v1/signin' , async (req , res) => {
     });
 
 
-    app.post('/api/v1/admin/market' , authmiddleware ,async ( req , res ) => {
+app.post('/api/v1/admin/market' , authmiddleware ,async ( req , res ) => {
 
 
         try { 
@@ -131,15 +134,13 @@ app.post('/api/v1/signin' , async (req , res) => {
 
         if(!symbol ||  !slug){
 
-            res.status(401).json({message : "The body is for request is not complete bro  "});
+            return res.status(401).json({message : "The body is for request is not complete bro  "});
         }
 
 
-
-        const token = req.headers.token; 
-
+const token = req.headers["x-admin-token"] || req.headers.token;
          if(!token){
-            res.status(401).json({message : "The body is for request is empty "});
+            return res.status(401).json({message : "The body is for request is empty "});
         }
         console.log(token); 
         console.log(process.env.ADMIN_SECRET); 
@@ -150,7 +151,7 @@ app.post('/api/v1/signin' , async (req , res) => {
       const response  = await prisma.market.create({
 
             data : {
-                slug : symbol,
+                slug : slug,
                 symbol : symbol,
                 imgUrl : imgUrl || null,
                 tickSize : tickSize , 
@@ -183,7 +184,7 @@ app.post('/api/v1/signin' , async (req , res) => {
  });
 
 
-    app.post('/api/v1/onRamp' ,authmiddleware , async ( req , res) => { 
+app.post('/api/v1/onRamp' ,authmiddleware , async ( req , res) => { 
 
         const userId : string = req.userId!;   // decoded by the  middleware 
 
@@ -208,8 +209,57 @@ app.post('/api/v1/signin' , async (req , res) => {
         }); 
     });
 
+
+ app.post(`/api/v1/order` , authmiddleware , async(req: any  , res) => {
+
+      // we extarct the user id from the jwt middleware 
+    try { 
+         
+       const userId= req.userId;
+        // we extract all the things that we need for the order to be placed form the body of the req 
+        const { marketId , qty , side , leverage = 1  , orderType , timeInForce = "GTC" , reduceOnly=false  , price}  = req.body; 
+
+
+        if(!qty || !side || !marketId || !orderType || !price){
+
+            return res.status(404).json({message : "The market order is getting invalidated due to a lack of fields" });
+            
+        }
+
+        const orderId = Bun.randomUUIDv7();
+
+        // this request goes to the loopback function in the backend 
+        const queuedLoopBackResponse = await loopback({
+              messageType : "CREATE_ORDER", 
+              side : side ,
+              qty : qty.toString() ,
+              leverage : leverage ,
+              orderId : orderId ,
+              orderType : orderType ,
+              price : price, 
+              timeInForce : timeInForce,
+              reduceOnly : reduceOnly ,
+              marketId : marketId , 
+              userId : userId , 
+
+        });
+
+        return res.status(200).json ({
+            orderId, 
+            message: "The engine has replayed with this" ,
+            result : queuedLoopBackResponse
+        });
+}catch(error){
+
+    console.log(`There was a error creating the order as ${error}`);
+    return res.status(500).json({message : " Internal Server Error " , details : String(error) });
+}
+
+
+ })   
+
     
-    app.delete(`/api/v1/order/:orderId` , authmiddleware , async(req :any   , res) => {
+app.delete(`/api/v1/order/:orderId` , authmiddleware , async(req :any   , res) => {
 
         try {
          const  userId =req.userId; 

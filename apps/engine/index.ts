@@ -97,10 +97,10 @@ console.log("engine req is reaching here ")
 
 // THE entry message is currently is an strinfied version of the message 
 // we have to destructure it and extract the loopback id of the message 
-const loopBackId = entry.message.loopbackId; 
+const loopbackId = entry.message.loopbackId; 
 
 // this has the data that we are supposed to work on 
-const command : toEngine = JSON.parse(entry.message.payload);  
+const command : toEngine = JSON.parse(entry.message.payload!);  
 
 
 
@@ -122,7 +122,7 @@ if(command.messageType == "CREATE_ORDER"){
 
     await publisher.xAdd("to-backend" , "*", { 
 
-        loopBackId,
+        loopbackId,
         status : "REJECTED",
         data : "",
         error : "MARKET_NOT_FOUND_BRO"
@@ -144,7 +144,7 @@ const numPrice = price ? parseFloat(price) : book.lastTradedPrice;
 if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
 
     await publisher.xAdd("to-backend", "*" ,{
-   loopBackId , 
+   loopbackId , 
    status : "REJECTED",
    data : "",
    error: "INVAILD_PRICE_OR_QTY"
@@ -164,7 +164,7 @@ if(currentAvailBalance < reqMargin){
 
     await publisher.xAdd("to-backend" , "*", {
 
-        loopBackId , 
+        loopbackId , 
         status : "REJECTED" ,
         data : "" ,
         error : "INVAILD_AVAILABLE_BAL_BROO"
@@ -319,8 +319,11 @@ if(currentAvailBalance < reqMargin){
                 level ={
                 totalQty : "0",
                 orders : [],
-            }
             };
+
+                targetSide.set(restingPrice, level);
+
+            }
 
             
             //pushing our order to the level that was needed 
@@ -392,7 +395,7 @@ if(currentAvailBalance < reqMargin){
 
         await publisher.xAdd("to-backend" , "*", {
 
-            loopBackId , 
+            loopbackId , 
             status : "SUCCESS" ,
             data : JSON.stringify({
               orderId , 
@@ -424,7 +427,11 @@ if(currentAvailBalance < reqMargin){
         }
         // now the create order endpoint is finally done bro 
         // its done BRO ;)
+
+       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue; 
 }
+
 
 if(command.messageType == "CREATE_MARKET"){ 
 
@@ -437,7 +444,7 @@ if(command.messageType == "CREATE_MARKET"){
 
         await publisher.xAdd("to-backend" , "*", {
 
-            loopBackId , 
+            loopbackId , 
             status : "REJECTED",
             data : "",
             error : "MARKET_ALREADY_EXISTS"
@@ -468,7 +475,7 @@ console.log("orderBook has been created for the market ");
 // the orderbook has been created for the  
 
 await publisher.xAdd("to-backend", "*", {
-    loopBackId ,
+    loopbackId ,
     status : "SUCCESS",
     data : JSON.stringify({
      marketId,
@@ -501,7 +508,7 @@ if(command.messageType == "ON_RAMP"){
 
         await publisher.xAdd("to-backend", "*", {
 
-            loopBackId , 
+            loopbackId , 
             status : "REJECTED",
             data : "",
             error : "AMOUNT_IS_TOO_LOW"
@@ -529,7 +536,7 @@ console.log(`Engine has onrampeed the balances for this userid : ${userId} by  t
 
 await publisher.xAdd("to-backend", "*", {
 
-    loopBackId : loopBackId ,
+    loopbackId : loopbackId ,
     status : "SUCCESS", 
     data : JSON.stringify( {
       userId ,
@@ -557,7 +564,7 @@ if(command.messageType == "CANCEL_ORDER"){
     if(!book){
 
         await publisher.xAdd("to-backend", "*", {
-            loopBackId , 
+            loopbackId , 
             status : "REJECTED", 
             data : "",
             error : "MARKET_DOES_NOT_EXISTS_BRO"
@@ -641,7 +648,7 @@ if(!foundOrder || !orderPrice){
 
     await publisher.xAdd("to-backend", "*", {
 
-        loopBackId , 
+        loopbackId , 
         status : "REJECTED",
         data : "",
         error : "THE_ORDER_WAS_NOT_FOUND_OR_FILLED"
@@ -672,7 +679,7 @@ if(Balance){
 // all is now set what is left is to notify the backend what is hapning 
 
 await publisher.xAdd("to-backend", "*", {
-    loopBackId ,
+    loopbackId ,
     status : "SUCCESS",
     data : JSON.stringify({
         orderId,
