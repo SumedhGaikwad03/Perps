@@ -63,6 +63,14 @@ export type toEngine =  {
 
     reduceOnly : boolean , 
 
+    } | {
+
+        messageType : "CHECK_LIQUIDATIONS" , 
+
+        marketId : string , 
+
+        markPrice : string , 
+        
     }
 
 

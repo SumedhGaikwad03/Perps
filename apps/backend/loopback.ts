@@ -41,7 +41,9 @@ await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP , "0" ,
     }
 
 
-} }
+} 
+
+}
 
 
 
@@ -57,18 +59,58 @@ export function loopback( message : toEngine ) : Promise<unknown> {
        // // generates a random cryptograpically secure uuid for each redis request cycle 
         const loopbackId = randomUUIDv7(); 
 
-        
-        // this is the saving of the loopback id to the map which we later retrive to resolve 
-        loopBackResolves.set(loopbackId, {resolve, reject}); 
 
 
-        console.log("loopback resolve this is prior to the resolve "); 
+        console.log(`loopback id is genreated by the file  ${loopbackId}`); 
+    
+
+         // we store three things in this object as resolve reject and timer id for early id 
+        const pendingPromise : DefferedPromise = {
+
+            resolve,
+            reject ,
+            // this line below gives the return type of the settimoot variable and all 
+            timer :undefined as unknown as ReturnType<typeof setTimeout> 
+        }  
+
+         // this is the saving of the loopback id to the map which we later retrive to resolve or reject 
+        loopBackResolves.set(loopbackId, pendingPromise); 
          
          // add the request to the queue called "engine" with the message like loopbackid and all 
         // as this makes redis accept the stringfied message  
          client.xAdd("engine", "*", {loopbackId , payload: JSON.stringify(message)}) 
-        .then(()=> {
-            console.log("request  published succesfully ");
+        .then(()=> { 
+
+            // as the engine is done publishing the request then 
+            console.log("request  published succesfully by the loopback file  to the engine stream "); 
+
+
+
+
+
+        pendingPromise.timer = setTimeout(()=> {
+
+        // this block executes code when 10 sec has elapshed then this block is triggerd that resolves the promise created 
+        // the the engine 
+ 
+        // by binding the timer to the a object we can track the timer and help can cancel dummy execution 
+        const currentPendingPromise = loopBackResolves.get(loopbackId);
+
+        if(currentPendingPromise){ 
+
+        loopBackResolves.delete(loopbackId);
+
+        currentPendingPromise.reject(
+            new Error (`Engine loopback timed out after 10000 for id ${loopbackId}`)
+        );
+     }
+      },10000);   
+     // name of the redis stream we push is engine and , * is the unique msg id 
+         console.log("loopback has been published to a queue");
+        //loopback.Resolves.set(loopbackId, resolve); 
+            
+          
+
     })
        .catch((error) => {
 
@@ -78,24 +120,7 @@ export function loopback( message : toEngine ) : Promise<unknown> {
        }); 
      
 
-    const timer = setTimeout(()=> {
-
-        // this block executes code when 10 sec has elapshed then this block is triggerd that resolves the promise created 
-        // the the engine 
-
-     const pending = loopBackResolves.get(loopbackId);
-
-     if(pending){
-
-        loopBackResolves.delete(loopbackId);
-        pending.reject(
-            new Error (`Engine loopback timed out after 10000 for id ${loopbackId}`)
-        );
-     }
-      },10000);   
-     // name of the redis stream we push is engine and , * is the unique msg id 
-         console.log("loopback has been published to a queue");
-        //loopback.Resolves.set(loopbackId, resolve); 
+    
 
     });
 
@@ -108,6 +133,8 @@ async function main () {
 
     while(1){
 
+
+        // the consumer name is the consumer that is assaigned to read form the queue to backend 
     const currentMsg = await subscriber.xReadGroup(BACKEND_CONSUMER_GROUP, CONSUMER_NAME , [{
 
         key : "to-backend", 
@@ -120,25 +147,30 @@ async function main () {
     }
      );
 
-     try {
+     try { 
 
-     const entry  = currentMsg?.[0]?.messages[0]; //this is the msg that the other queue responed with and this is genrally an array of messages that the other queue sends 
-     // to us 
+        // this entry retrives the first message form the redis queue as is 
+
+     const entry  = currentMsg?.[0]?.messages[0]; 
+     // the current message represents all the streams of redis right now there is only one stram that is to backend stream  
 
      if(!entry){
         continue;
      }
+
+     // we extract the status from the current data stream message 
 
      const { loopbackId, status, data, error } = entry.message as {
         loopbackId: string;
         status: "SUCCESS" | "REJECTED" | "ERROR";
         data?: string;
         error?: string;
-      };
+      }; 
 
-      const pending = loopBackResolves.get(loopbackId);
+     
+      const pendingPromise = loopBackResolves.get(loopbackId);
 
-      if(pending){
+      if(pendingPromise){
 
         loopBackResolves.delete(loopbackId);
       }
@@ -146,15 +178,17 @@ async function main () {
       if(status == "SUCCESS"){
 
         const parsedData = data ? JSON.parse(data): null ;  
-        pending?.resolve(parsedData); // we resolved the promise here that was pending as the current order is executed here 
+        pendingPromise?.resolve(parsedData); 
+        // we resolved the promise here that was pending as the current order is executed here 
      }
      else{
 
-        pending!.reject(new Error( error || "engine rejected request "))
+        pendingPromise?.reject(new Error( error || "engine rejected request "))
      }
 
 
-
+       // this message ack that the consumer "BACKEND CONSUMER GROUP " group has sucessfully acked the request the "to-backend" req w
+       // with the entry.id as in that request is sorted  
       await subscriber.xAck("to-backend", BACKEND_CONSUMER_GROUP, entry.id) // this snipped tell that the 
 
 

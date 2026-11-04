@@ -1,6 +1,7 @@
 import {createClient} from "redis"; 
 
 import type {orderSide, toEngine} from "common" ; 
+import { main } from "bun";
 
 
 // we iniataire two instances that would read and publish the message for this stream 
@@ -54,17 +55,297 @@ interface OrderBook {
     stepSize : string,
 }
 
+interface Position {
+ userId : string , 
+ marketId : string , 
+ side : "LONG" | "SHORT",
+ qty : string , 
+ entryPrice : string , 
+ margin : string ,
+ leverage : string
+} 
 
+
+
+
+// we need to add the map for markprices, for the markets ,
+//this is used for calauating the liquadations 
+
+const markPrices = new Map< string , string>() ;
 // this is a master register that keeps all the order books within itself 
 const orderBook  = new Map<string , OrderBook>() ; 
 
 // this is the master register for balances to keep all the balances for the users 
 const Balances : Map<string, {available_bal:string , locked_bal:string}>  = new Map();
 
-console.log("engine has started"); 
+//this is the map for all the posostions that  exists in the engine 
+const Positions :Map<string , Position> = new Map();
+
+// the confindence margin that the engine uses to check for liquadations as this is 2.5% this
+// helps to build the insureance fund of the engine 
+const DefaultMrr = 0.025; 
+
+console.log("engine has started");  
+
+
+
+async function sweepLiquadations() {
+
+
+
+    if(Positions.size === 0 || markPrices.size === 0) return ; 
+
+  
+    // this list will store all the liquadated postions 
+    const liquadatedList : any[] = [] ; 
+
+    for(const[posKey , pos] of Positions.entries()){ 
+  
+        const marketId = pos.marketId; 
+        const entryPrice = parseFloat(pos.entryPrice);
+        const intialMargin = parseFloat(pos.margin);
+        const rawPrice  = markPrices.get(marketId);
+
+        if(!rawPrice) continue; 
+        
+        const markPrice = parseFloat(rawPrice); 
+
+        if(!markPrice || markPrice <= 0 ){
+            continue; 
+        }
+
+        const qty = parseFloat(pos.qty);
+
+        if(qty<=0){
+            continue;
+        }
+
+ const unRealaisedPnl = pos.side == "LONG" ? (markPrice - entryPrice)*qty : (entryPrice - markPrice)*qty ;
+
+ const equity = intialMargin + unRealaisedPnl ;
+
+ const maintainenceMargin = qty*markPrice*DefaultMrr;
+
+ if(equity<=maintainenceMargin){
+    Positions.delete(posKey);
+
+    liquadatedList.push({
+    posKey ,
+    userId : pos.userId,
+    marketId : pos.marketId,
+    equity  : equity,
+     mrr   : maintainenceMargin,
+     markPrice : markPrices.get(marketId)
+ });
+
+
+ await publisher.xAdd("db-events" ,"*", {
+    eventType : "POSITION_LIQUIDATED",
+    payload : JSON.stringify({
+        status : "SUCESSS", 
+       userId : pos.userId,
+    marketId : pos.marketId,
+    equity  : equity,
+     mrr   : maintainenceMargin,
+     markPrice : markPrices.get(marketId)
+
+    }),
+
+
+ });
+
+
+
+
+
+
+
+
+    
+ 
+ }
+
+    
+}}
+
+async function fundingRate(){
+
+    // iterata over all the insalised prices in the market 
+
+if (orderBook.size == 0){
+    return;
+}
+
+for(const [marketKey, orderbook] of orderBook){
+
+    // now we have to ierate over the entrire market one by one 
+
+    const perpPrice =orderbook.lastTradedPrice;
+
+    const markPrice = parseFloat(markPrices.get(marketKey)!);
+
+    let  premiumRate = markPrice> 0 
+    ? (perpPrice - markPrice) / markPrice
+    : 0;
+
+    //now we have to find who pays who 
+
+    premiumRate = Math.min(Math.max(premiumRate, -0.0005),0.0005);
+
+    if(premiumRate === 0 ){
+        continue; 
+    }
+
+    const settlements :any[] = [];
+   // now as we have the preminum rate we now have to iterate 
+    for(const [postionKey , pos ] of Positions){
+
+       if(pos.marketId != marketKey){
+
+        continue; 
+       }
+
+       const qty = parseFloat(pos.qty);
+
+       if(qty<=0){
+        continue; 
+       }
+
+       const notinalValue = qty * markPrice;
+       const paymentValue =notinalValue*Math.abs(premiumRate);
+       
+       // this line of code determines is the curret user is payable 
+       const isPayer = premiumRate > 0 ? pos.side === "LONG" : pos.side === "SHORT";
+
+       const userBal = Balances.get(pos.userId);
+
+       if(!userBal){
+        continue; 
+       }
+
+       let currentAvail = parseFloat(userBal.available_bal);
+
+       if(!isPayer){
+    // if the current user is not the payer then we add the payment value to the player 
+        currentAvail += paymentValue;
+       }
+       else{
+
+        if(currentAvail > paymentValue){
+
+            currentAvail-=paymentValue;
+        }
+        // the payee does not have enough to pay the other peer 
+          else(currentAvail < paymentValue){
+
+        const shortfall = paymentValue - currentAvail ;
+
+        // to recover this shortfall form the paymets margin we have to do this 
+
+        // exhaust his current available 
+        currentAvail = 0 ; 
+
+        const currentMargin = parseFloat(pos.margin);
+
+        if(currentMargin > shortfall){
+
+            pos.margin = (currentMargin - shortfall).toString();
+            // we updated the position here 
+            Positions.set(postionKey,pos); 
+        
+
+        }else {
+
+            // if even the marigin is not enough then its bad debt wee have to cover it form our side 
+
+            const badDebt = shortfall - currentMargin ;
+
+            pos.margin="0";
+
+            // we have to delete the postion 
+
+            Positions.delete(postionKey);
+            
+            
+            await publisher.xAdd("db-events", "*", {
+
+                eventType : "POSITION_BANKRUPT",
+                payload : JSON.stringify({
+
+                    userId : pos.userId,
+                    marketId : pos.marketId,
+                    side : pos.side,
+                    qty : pos.qty,
+                    badDebt : badDebt,
+                    reason : "FUNDING_INSOLVANCY",
+                }),
+            });
+
+            console.warn(`[FUNDING_INSOLVANCY] has happend for this ${pos.userId} in the market ${pos.marketId} for ${badDebt}`);
+
+        }
+
+          }
+       }
+
+       Balances.set(pos.userId, {
+        available_bal : currentAvail.toString(),
+        locked_bal : userBal.locked_bal
+
+       });
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
+
+}
+
+const liquadation_intervals = 1000;
+
+function startLiquidationPoller(){
+
+    setInterval(()=> {
+
+        sweepLiquadations().catch((err) => {
+
+            console.log("There is a big error in liquadation  broo" , err)
+        });
+    }, liquadation_intervals);
+
+}
+
+const fundingRate_poller = 60*60*1000;
+
+function startFundingRatePoller(){
+    setInterval(() => {
+
+        fundingRate().catch((err)=> {
+
+            console.log("funding rate poller erroe",err);
+     } )
+        }, fundingRate_poller);
+    
+}
+startFundingRatePoller();
 
 
 while(true){
+
+    
+ // this is the sniipet to start the liquadation poller 
+    startLiquidationPoller(); 
+
 
     try {
 
@@ -88,6 +369,7 @@ if(!response || !response[0]?.messages[0]){
     continue; 
 } 
 
+
 // this is the entrie redis message that is received by the consermerworkr  
 const  entry = response[0]?.messages[0];
 
@@ -100,6 +382,7 @@ console.log("engine req is reaching here ")
 const loopbackId = entry.message.loopbackId; 
 
 // this has the data that we are supposed to work on 
+// this is basically an type check for the message we are working with 
 const command : toEngine = JSON.parse(entry.message.payload!);  
 
 
@@ -141,6 +424,7 @@ const numQty = parseFloat(qty);
 const numPrice = price ? parseFloat(price) : book.lastTradedPrice; 
 
 
+// checks if the user has given a vaild price and quantity 
 if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
 
     await publisher.xAdd("to-backend", "*" ,{
@@ -153,7 +437,11 @@ if(numQty<=0 || (orderType === "LIMIT" && (!price || numPrice <= 0))){
     await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
     continue; 
 }
+
+
 const userLeverage = command.leverage ? parseFloat(leverage) : 1 ;  
+
+// check if the user needs extra margin to open an trade as is he squaring down on the current postion or opening a new posistion 
 
 const reqMargin = command.reduceOnly ? 0 : ((numQty * numPrice)/userLeverage);
 
@@ -169,7 +457,7 @@ if(currentAvailBalance < reqMargin){
         data : "" ,
         error : "INVAILD_AVAILABLE_BAL_BROO"
     }); 
-
+    // this file ack the fact that the engine has admited that this request is acknowldge 
     await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
     continue ; }
 
@@ -432,9 +720,10 @@ if(currentAvailBalance < reqMargin){
         continue; 
 }
 
-
 if(command.messageType == "CREATE_MARKET"){ 
-
+   
+    // to calauate the markprice the mark prices should only be created on top of existince market places 
+    // then the mark price calaultion becomes easy and secure 
      // we are extracting the market here 
     const {symbol ,tickSize , stepSize  , marketId} = command ;  
 
@@ -495,9 +784,12 @@ continue;
 
 if(command.messageType == "ON_RAMP"){
 
+    
+    // extarct the info from the command 
+
     const {userId , amount} = command ; 
 
-    // this is the amount that 
+    // we have to de-stringyfy the amount that was injested in the engine 
     const numAmount = parseFloat(amount); 
 
     // now we have to move ahead the as we nw have to amount 
@@ -514,7 +806,7 @@ if(command.messageType == "ON_RAMP"){
             error : "AMOUNT_IS_TOO_LOW"
         });
     
-   
+   // every rejected or passed requets must be ack by the engine 
 await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
 continue; }
 
@@ -706,94 +998,92 @@ await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
 continue;
 }
 
+if(command.messageType == "CHECK_LIQUIDATIONS"){ 
+
+    // lets start to check the the market id for this route as 
+    
+    
+    const {marketId , markPrice} = command ;  
+
+    const numMarkPrice = parseFloat(markPrice); 
+
+    // the positions that are suppose to be liquadted 
+    const liquadatedList : any[] = []; 
+
+    //now we iterate over the postions array here 
+    for (const [posKey , pos ] of Positions.entries()){ 
+
+ 
+        // check for the market that does the market even exist 
+        if(pos.marketId != marketId) {
+            continue ;
+        }
+
+        const qty = parseFloat(pos.qty) 
+
+        if(qty<=0){
+            continue; 
+        }
+
+        const entryPrice = parseFloat(pos.entryPrice);
+
+        const intialMargin = parseFloat(pos.margin);  
 
 
+     const unRealaisedPnl = pos.side == "LONG" ? (numMarkPrice - entryPrice)*qty : (entryPrice - numMarkPrice)*qty ; 
+     
+     const currentEquity = intialMargin + unRealaisedPnl ; 
+
+     const maintainenceMargin = qty * numMarkPrice * DefaultMrr ; 
 
 
+     if(currentEquity <= maintainenceMargin){
+         
+        // we have deleted the positon form the postion 
+        Positions.delete(posKey);
 
+        liquadatedList.push({
+         posKey,
+         userId : pos.userId ,
+         marketId : pos.marketId,
+         qty: pos.qty,
+         markPrice : markPrice,
+        })
 
+     }
+   // now we have to aintain a queue for db writes here  
 
+   await publisher.xAdd("db-events", "*", {
+    eventType : "POSITION_LIQUIDATED",
+    payload : JSON.stringify({
+        userId : pos.userId,
+        marketId : pos.marketId,
+        qty : pos.qty,
+        markPrice: markPrice,
+        loss : (intialMargin - currentEquity)
+        }),
+   }); 
 
+   // now we have to make the backend poller as this was the request that the backend sent to here 
 
+   await publisher.xAdd("to-backend" , "*", {
+   
+    loopbackId , 
+    data : JSON.stringify({
+        marketId,
+        count : liquadatedList.length,
+        liquadatedList : liquadatedList,
+    }),
+    error : ""
+   });
 
+}
 
-
-//     const existingbook = orderBook.get(
-//         (book) => book.marketId === message.marketId
-//     );
-
-//     if(existingbook){
-//         console.log("order book already exists with this id : " , existingbook.marketId)
-//     }
-//     else{
-
-//      const createdbook = {
-
-//         bids : new Map(),
-//         asks : new Map(),
-//         lastTradedPrice : -1 ,
-//         marketId : message.marketId
-
-
-//     }
-
-//     orderBook.push(createdbook);
-
-//     console.log("orderbook created as ");
-// console.dir(createdbook , {depth : null });
-
-//   }
-
-//     await publisher.xAdd("to-backend", "*" , {
-
-//     loopbackId: message.loopbackId ,
-//     // this tell that this id has been processed 
-//     result : JSON.stringify({success :true})
-// });
-
+await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+continue; 
+// this is now done for this endpoint here 
+}
   
-// await clientRead.xAck(
-//     "engine",
-//     "engine",
-//     entry.id
-// );
-
-
-
-// }
-// if(message.messageType == "onRamp") {
-
-//     const balance = Balances.get(message.userId) ?? {
-
-//         available_bal: "0" ,
-//         locked_bal : "0" 
-//     }; // we retirivied the user balances 
-
-//     Balances.set(message.userId , { ...balance , available_bal : String(Number(balance.available_bal) + Number(message.amount))});
-
-//     // this need to update the user balance in the system 
-//     // this upadates the balance in the ram 
-// await publisher.xAdd("to-backend", "*" , {
-
-//     loopbackId: message.loopbackId, // this tell that this id been processed 
-//     result : JSON.stringify({success : true})
-// })
-
-// await clientRead.xAck(
-//     "engine",
-//     "engine",
-//     entry.id
-// ); // this removes the msg form the plending entries list but the logs still persist 
-
-// }
-// //  now to publish the msg to the the other queue we need to publish the meassage 
-
-// if(message.messageType == "")
-
-
-
-
-
  }catch(err){
 
          console.error("[Engine Consumer Error]:" , err);

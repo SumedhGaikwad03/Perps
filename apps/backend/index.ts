@@ -199,7 +199,7 @@ app.post('/api/v1/onRamp' ,authmiddleware , async ( req , res) => {
         );
 
             if(queuedLoopbackResponse){
-            console.log(`money deposited in da bank`) ; 
+            console.log(`money deposited in da bank `) ; 
         }
 
 
@@ -297,6 +297,32 @@ app.delete(`/api/v1/order/:orderId` , authmiddleware , async(req :any   , res) =
             }); 
            }
     }); 
+
+
+app.post("/api/v1/engine/liquidations" , authmiddleware , async(req : any , res ) => { 
+   try {
+
+    const {marketId , markPrice} = req.body ; 
+
+    if(!marketId || !markPrice){
+
+        return res.status(400).json({message : "marketId  and markPrice are required broo"});
+    } 
+
+    const result = await loopback({
+        messageType : "CHECK_LIQUIDATIONS" ,
+        marketId ,
+        markPrice : markPrice.toString(),
+    }); 
+
+    return res.status(200).json(result);
+
+
+   }catch(error : any ){
+
+    return res.status(500).json({error :"Internal server error ", details : String(error)});
+   }
+});
 
 
 
