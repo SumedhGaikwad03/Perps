@@ -6,6 +6,11 @@ export type TimeInForce = "GTC" | "FOK"
 
 export type OrderType = "LIMIT" | "MARKET"
 
+// the as const at the end makes this specifically as read only tokens 
+export const SUPPORTED_BASE_TOKEN = ["BTC","SOL","ETH"] as const; 
+
+export type BaseToken = typeof SUPPORTED_BASE_TOKEN[number];
+
 
 export type toEngine =  {
 
@@ -29,6 +34,8 @@ export type toEngine =  {
     imgUrl? : string,
 
     slug : string , 
+
+    baseToken : string , 
 
     symbol : string ,
 
@@ -70,7 +77,7 @@ export type toEngine =  {
         marketId : string , 
 
         markPrice : string , 
-        
+
     }
 
 

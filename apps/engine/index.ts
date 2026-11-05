@@ -46,11 +46,12 @@ type OpenOrder = {
  }
 
 interface OrderBook {
-    bids : Map<string , PriceLevel> ;
-    asks : Map <string ,PriceLevel>;
-    lastTradedPrice : number ;
-    marketId : string ;
-    symbol : string;
+    bids : Map<string , PriceLevel> ,
+    asks : Map <string ,PriceLevel>,
+    lastTradedPrice : number ,
+    marketId : string ,
+    baseToken : string ,
+    symbol : string,
     tickSize : string,
     stepSize : string,
 }
@@ -60,16 +61,30 @@ interface Position {
  marketId : string , 
  side : "LONG" | "SHORT",
  qty : string , 
+ baseToken : string, 
  entryPrice : string , 
  margin : string ,
  leverage : string
 } 
+ // lets define the binance feed mapper that is used for mapping the prices for binance to the market we create 
+
+ const BINANCE_FEED_MAP : Record <string , string> = {
+
+    "btcusdt" : "BTC" ,
+    "ethusdt" : "ETH" , 
+    "solusdt" : "SOL",
+ };
+
+
+
+
+
 
 
 
 
 // we need to add the map for markprices, for the markets ,
-//this is used for calauating the liquadations 
+//this is used for calauating the liquadations this has the token prices for the token we have on the map here 
 
 const markPrices = new Map< string , string>() ;
 // this is a master register that keeps all the order books within itself 
@@ -79,11 +94,26 @@ const orderBook  = new Map<string , OrderBook>() ;
 const Balances : Map<string, {available_bal:string , locked_bal:string}>  = new Map();
 
 //this is the map for all the posostions that  exists in the engine 
+// key is userId :marketId 
 const Positions :Map<string , Position> = new Map();
+
+// this is defines as the base token market map here are some predefined maps 
+const baseTokenToMarkets = new Map<string , string[]>([
+  ["BTC", ["BTC_USD_PERP"]],
+  ["ETH" , ["ETH_USD_PERP"]],
+  ["SOL", ["SOL_USD_PERP"]],
+]);
+
+
 
 // the confindence margin that the engine uses to check for liquadations as this is 2.5% this
 // helps to build the insureance fund of the engine 
 const DefaultMrr = 0.025; 
+
+ // the as const at the end makes this specifically as read only tokens 
+export const SUPPORTED_BASE_TOKEN = ["BTC","SOL","ETH"] as const; 
+
+export type BaseToken = typeof SUPPORTED_BASE_TOKEN[number];
 
 console.log("engine has started");  
 
@@ -104,7 +134,11 @@ async function sweepLiquadations() {
         const marketId = pos.marketId; 
         const entryPrice = parseFloat(pos.entryPrice);
         const intialMargin = parseFloat(pos.margin);
-        const rawPrice  = markPrices.get(marketId);
+        const book = orderBook.get(pos.marketId);
+
+        if(!book) return ; 
+        const rawPrice  = markPrices.get(book.baseToken);
+
 
         if(!rawPrice) continue; 
         
@@ -182,7 +216,11 @@ for(const [marketKey, orderbook] of orderBook){
 
     const perpPrice =orderbook.lastTradedPrice;
 
-    const markPrice = parseFloat(markPrices.get(marketKey)!);
+    const rawPrice = markPrices.get(orderbook.baseToken);
+
+    if(!rawPrice) continue ; 
+
+    const markPrice = parseFloat(rawPrice);
 
     let  premiumRate = markPrice> 0 
     ? (perpPrice - markPrice) / markPrice
@@ -231,12 +269,12 @@ for(const [marketKey, orderbook] of orderBook){
        }
        else{
 
-        if(currentAvail > paymentValue){
+        if(currentAvail >= paymentValue){
 
             currentAvail-=paymentValue;
         }
         // the payee does not have enough to pay the other peer 
-          else(currentAvail < paymentValue){
+          else{
 
         const shortfall = paymentValue - currentAvail ;
 
@@ -311,6 +349,177 @@ for(const [marketKey, orderbook] of orderBook){
 
 }
 
+ function RegisterBinanceFeed( binanceIncoming : string , internalMarketId : string ){
+ BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = internalMarketId; 
+
+}
+
+function updatePositionFills(userId : string , marketId : string , baseToken : string , side : "LONG" | "SHORT" , fillQty : string , fillPrice : string , leverage :string){
+
+    // here we find the user and the market id for positions in that market here 
+    const posKey = `${userId}:${marketId}`; 
+
+    const existingPosition = Positions.get(posKey); 
+
+    // if that user does not have an position open in that market then 
+
+    if(!existingPosition){
+
+        const margin = ((parseFloat(fillQty) * parseFloat(fillPrice))/parseFloat(leverage)).toString();
+
+        Positions.set(posKey  , {
+            userId,
+            marketId,
+            baseToken,
+            side,
+            qty : fillQty,
+            entryPrice : fillPrice,
+            margin : fillPrice,
+            leverage : leverage, 
+
+
+        });
+        return ; 
+    }
+
+    // the postion in that market exists then we can do this as 
+
+    const existingQty = parseFloat(existingPosition.qty);
+    const existingPrice = parseFloat(existingPosition.entryPrice);
+    const existingMargin = parseFloat(existingPosition.margin);
+
+    // now we either add into the postion or dleverage the postion 
+
+    if(existingPosition.side === side ) { 
+
+        const newQty = existingQty + parseFloat(fillQty);
+
+        const avgEntryPrice = ((existingQty * existingPrice) + (parseFloat(fillQty) + parseFloat(fillPrice)))/newQty ;
+
+        const addedMargin = (parseFloat(fillQty) * parseFloat(fillPrice)/ parseFloat(leverage)) ; 
+
+        // now its time to set new postions here as 
+
+        Positions.set(posKey , {
+
+           ...existingPosition ,
+           qty : newQty.toString(),
+           entryPrice : avgEntryPrice.toString(),
+           margin : (existingMargin+addedMargin).toString(),
+
+        });
+         return ; 
+ } 
+ 
+ // now to handel the opposing side as 
+
+  if(parseFloat(fillQty) >= existingQty){
+
+    Positions.delete(posKey);
+
+  }else{
+    // if he is just squaring off the postion he himself made then 
+    const remaingQty = existingQty - parseFloat(fillQty);
+
+    const marginReduction = (parseFloat(fillQty)/existingQty)/existingMargin; 
+
+    Positions.set(posKey , {
+
+        ...existingPosition,
+        qty : remaingQty.toString(),
+        margin : Math.max(0,existingMargin-marginReduction).toString();
+    });
+
+
+  }
+
+
+
+
+
+
+
+}
+
+function startBinanceWebSocket (){
+
+    // we retrive all the keys from the record we created 
+
+    const streams = Object.keys(BINANCE_FEED_MAP)
+    .map((symbol) => `${symbol.toLowerCase()}@ticker`)
+    .join("/"); 
+
+    // this creates a stream url that will be used for the binace api 
+
+    const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`; 
+    // this is the url that is used to ping the binace url that we use to get data for the project 
+
+    const webSocket = new WebSocket(wsUrl);
+
+
+    webSocket.onopen = () => {
+
+        console.log(`Binance Live Feed is connected here `);
+    };
+
+    // the web socket is now connected to the project lets start to deatructre the message 
+
+    webSocket.onmessage = (event) => {
+
+        // right now the event object has all the data that is needed  
+
+        try {
+
+            const message = JSON.parse(event.data.toString());
+
+            const tick = message.data;
+
+
+            // we check if the message has the symbol or the closing price here 
+            if(!tick?.s || !tick?.c ){
+
+                return ; 
+            }
+
+            const incomingToken = tick.s.toLowerCase();
+
+            const baseToken = BINANCE_FEED_MAP[incomingToken];
+
+            if(baseToken){
+            markPrices.set(baseToken,tick.c); 
+          }
+        
+        }catch(err)  {
+            console.log(`There was a internal market error`, err);
+
+            }
+
+        }; 
+
+        webSocket.onerror = (error) => {
+
+            console.log("binance connection error has happened", error);
+    };
+
+    webSocket.onclose = ()=>{
+
+        console.log("The websocket is disconnected trying to reping in 3 sec ");
+
+        setTimeout(()=> {
+
+            startBinanceWebSocket();
+        },3000);
+    };
+
+
+    // this is the binace connection endpoint for the project 
+
+
+
+}
+
+
+
 const liquadation_intervals = 1000;
 
 function startLiquidationPoller(){
@@ -341,10 +550,9 @@ startFundingRatePoller();
 
 
 while(true){
-
-    
+  
  // this is the sniipet to start the liquadation poller 
-    startLiquidationPoller(); 
+    //startLiquidationPoller(); 
 
 
     try {
@@ -569,17 +777,61 @@ if(currentAvailBalance < reqMargin){
         } 
     }
         
-        // update the last traded price with the most reeint fills in the table 
+        // update the last traded price with the most recent fills in the table 
 
-        if(fills.length> 0 ){
-
-            book.lastTradedPrice = parseFloat(fills[fills.length-1]!.price);
-        }
+       
 
 
 
          }
 
+          if(fills.length> 0 ){
+
+            book.lastTradedPrice = parseFloat(fills[fills.length-1]!.price);
+
+                // as if the trader has a buy order then i.e isbid is true then make the taker side as long 
+        const takerSide : "LONG" | "SHORT" = isBid ? "LONG" : "SHORT" ;
+
+        // also the same way we have to find the maker side as he is always opposite of the maker here 
+
+        const makerSide : "LONG" | "SHORT" = isBid ? "SHORT" : "LONG" ; 
+        
+
+        // now we have to update the postions for each of the trader as 
+         for(const fill of fills){
+
+            const fillQty = fill.qty;
+            const fillPrice = fill.price;
+
+          
+
+        // this is for the taker id 
+        updatePositionFills(
+            userId,
+            marketId,
+            book.baseToken,
+            takerSide, 
+            fill.qty,
+            fill.price,
+            userLeverage.toString()
+            );
+
+        // this is for the maker id 
+
+            updatePositionFills(
+
+                fill.makerUserId,
+                marketId,
+                book.baseToken,
+                takerSide,
+                fill.qty,
+                fill.price,
+                userLeverage.toString()
+            );
+        } 
+
+        
+    }
          // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over 
 
          let finalStatus :  "FILLED" | "PARTIALLY_FILLED" | 'OPEN' = "FILLED" ; 
@@ -725,7 +977,7 @@ if(command.messageType == "CREATE_MARKET"){
     // to calauate the markprice the mark prices should only be created on top of existince market places 
     // then the mark price calaultion becomes easy and secure 
      // we are extracting the market here 
-    const {symbol ,tickSize , stepSize  , marketId} = command ;  
+    const {symbol ,tickSize , stepSize  , marketId, baseToken} = command ;  
 
     // we have to check if the duplicate market even exist 
 
@@ -745,18 +997,48 @@ if(command.messageType == "CREATE_MARKET"){
         continue;
     }
 
+    const rawbaseToken = baseToken?.toUpperCase();
+    
+    if(!rawbaseToken || !baseTokenToMarkets.has(rawbaseToken)){
+
+        console.log("this base token does not exist in the project broo");
+
+        await publisher.xAdd("to-backend" ,"*", {
+
+            loopbackId,
+            status : "REJECTED",
+            data : "",
+            error : "BASE_TOKEN_DOES_NOT_SUPPORTED"
+        });
+
+        await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+        continue;
+    }
+ 
+    // time to piggyback the existing tokens to the already defines base tokens in the program 
+    const existingMarkets = baseTokenToMarkets.get(rawbaseToken) ?? []; 
+    baseTokenToMarkets.set(rawbaseToken,[...existingMarkets , marketId]); 
+
+
+
+
+    const currentMarkPrice =markPrices.get(baseToken);
+
     // now we have vaildated  that the engine exists then we move ahead and create an orderbook 
 
     const newBook : OrderBook  = {
 
         marketId, 
         symbol,
-        lastTradedPrice : 0,
+        lastTradedPrice : currentMarkPrice ? parseFloat(currentMarkPrice): 0,
         tickSize ,
         stepSize,
+        baseToken : baseToken,
         bids : new Map <string , PriceLevel >(),
         asks : new Map <string , PriceLevel>(),
-};
+}; 
+
+
 
 orderBook.set(marketId,newBook); 
 
@@ -768,6 +1050,7 @@ await publisher.xAdd("to-backend", "*", {
     status : "SUCCESS",
     data : JSON.stringify({
      marketId,
+     baseToken,
      symbol,
      tickSize,
      stepSize,
@@ -776,10 +1059,20 @@ await publisher.xAdd("to-backend", "*", {
      error : "",
 }); 
 
+
+await publisher.xAdd("db-events" ,"*" , {
+    eventType : "MARKET_CREATED",
+    payload : JSON.stringify({
+     marketId,
+     symbol,
+     baseToken : baseToken ,
+     tickSize : tickSize,
+     stepSize :stepSize,
+    }),
+});
+
 await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
 continue;
-
-
 }
 
 if(command.messageType == "ON_RAMP"){
@@ -998,92 +1291,6 @@ await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
 continue;
 }
 
-if(command.messageType == "CHECK_LIQUIDATIONS"){ 
-
-    // lets start to check the the market id for this route as 
-    
-    
-    const {marketId , markPrice} = command ;  
-
-    const numMarkPrice = parseFloat(markPrice); 
-
-    // the positions that are suppose to be liquadted 
-    const liquadatedList : any[] = []; 
-
-    //now we iterate over the postions array here 
-    for (const [posKey , pos ] of Positions.entries()){ 
-
- 
-        // check for the market that does the market even exist 
-        if(pos.marketId != marketId) {
-            continue ;
-        }
-
-        const qty = parseFloat(pos.qty) 
-
-        if(qty<=0){
-            continue; 
-        }
-
-        const entryPrice = parseFloat(pos.entryPrice);
-
-        const intialMargin = parseFloat(pos.margin);  
-
-
-     const unRealaisedPnl = pos.side == "LONG" ? (numMarkPrice - entryPrice)*qty : (entryPrice - numMarkPrice)*qty ; 
-     
-     const currentEquity = intialMargin + unRealaisedPnl ; 
-
-     const maintainenceMargin = qty * numMarkPrice * DefaultMrr ; 
-
-
-     if(currentEquity <= maintainenceMargin){
-         
-        // we have deleted the positon form the postion 
-        Positions.delete(posKey);
-
-        liquadatedList.push({
-         posKey,
-         userId : pos.userId ,
-         marketId : pos.marketId,
-         qty: pos.qty,
-         markPrice : markPrice,
-        })
-
-     }
-   // now we have to aintain a queue for db writes here  
-
-   await publisher.xAdd("db-events", "*", {
-    eventType : "POSITION_LIQUIDATED",
-    payload : JSON.stringify({
-        userId : pos.userId,
-        marketId : pos.marketId,
-        qty : pos.qty,
-        markPrice: markPrice,
-        loss : (intialMargin - currentEquity)
-        }),
-   }); 
-
-   // now we have to make the backend poller as this was the request that the backend sent to here 
-
-   await publisher.xAdd("to-backend" , "*", {
-   
-    loopbackId , 
-    data : JSON.stringify({
-        marketId,
-        count : liquadatedList.length,
-        liquadatedList : liquadatedList,
-    }),
-    error : ""
-   });
-
-}
-
-await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
-continue; 
-// this is now done for this endpoint here 
-}
-  
  }catch(err){
 
          console.error("[Engine Consumer Error]:" , err);
