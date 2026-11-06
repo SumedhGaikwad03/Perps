@@ -58,6 +58,7 @@ model Market {
   slug      String     @unique
   imgUrl    String? 
   orders    Order[]
+  baseToken String 
   positions Position[]
   fills     Fill[]
   tickSize  String   @default("0.1")

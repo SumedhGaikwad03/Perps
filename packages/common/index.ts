@@ -97,6 +97,80 @@ export type toEngine =  {
     } 
 
 
+    export interface Tradefill {
+
+    price : string ;
+    qty : string ;
+    makerUserId : string ;
+    makerOrderId : string ;
+    makerUserLeverage : string ;
+}
+
+export interface TradeExecutedPayload {
+
+    takerOrderId : string ;
+    takerUserId : string ; 
+    marketId : string ;
+    fills : Tradefill[];
+}
+
+export interface OrderCancelledPayload {
+
+    orderId : string ;
+    userId : string ;
+    marketId : string ;
+    status : "CANCELLED" ;
+}
+
+export interface PositionLiquidatedPayload {
+
+    status : string ;
+    userId : string;
+    marketId : string;
+    equity : string;
+    mrr : string ;
+    markPrice?: string ;
+}
+
+export interface PositionBankruptPayload {
+
+    status : string ;
+    marketId : string ;
+    userId : string ; 
+    side : "LONG" | "SHORT" ;
+    qty : string ;
+    badDebt : string ;
+    reason : string 
+} 
+
+export interface MarketCreatedPayload {
+
+    marketId : string ,
+
+    imgUrl? : string,
+
+    slug : string , 
+
+    baseToken : string , 
+
+    symbol : string ,
+
+    tickSize : string , 
+
+    stepSize : string,}
+
+export type dbEvent = 
+ | "TRADE-EXECUTED" 
+ | "ORDER-CANCELLED"
+ | "POSITION-LIQUIDATED"
+ | "POSITION-BANKRUPT"
+ | "MARKET-CREATED";
+
+
+
+
+
+
 
 // all the values are now created 
 

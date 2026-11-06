@@ -96,15 +96,15 @@ export const SUPPORTED_BASE_TOKEN = ["BTC", "SOL", "ETH"] as const;
 
 export type BaseToken = (typeof SUPPORTED_BASE_TOKEN)[number];
 
-console.log("engine has started"); 
+console.log("engine has started");
 
-// this is the funtion that is used start 
+// this is the funtion that is used start
 const liquadation_intervals = 1000;
 
-//this is the functionthat start the liqdation of the funding rate 
+//this is the functionthat start the liqdation of the funding rate
 const fundingRate_poller = 60 * 60 * 1000;
 
-// this is the function that is used for liqautating the orders 
+// this is the function that is used for liqautating the orders
 async function sweepLiquadations() {
   if (Positions.size === 0 || markPrices.size === 0) return;
 
@@ -144,9 +144,9 @@ async function sweepLiquadations() {
     const maintainenceMargin = qty * markPrice * DefaultMrr;
 
     if (equity <= maintainenceMargin) {
-      Positions.delete(posKey); 
+      Positions.delete(posKey);
 
-      // delete the postion and the loss is taken up by the exchaange 
+      // delete the postion and the loss is taken up by the exchaange
 
       liquadatedList.push({
         posKey,
@@ -156,7 +156,7 @@ async function sweepLiquadations() {
         mrr: maintainenceMargin,
         markPrice: markPrices.get(marketId),
       });
-      // we have make it real time so we have to backend or engine 
+      // we have make it real time so we have to backend or engine
 
       await publisher.xAdd("db-events", "*", {
         eventType: "POSITION_LIQUIDATED",
@@ -173,7 +173,7 @@ async function sweepLiquadations() {
   }
 }
 
-// this is the funtion is used for funding rate 
+// this is the funtion is used for funding rate
 async function fundingRate() {
   // iterata over all the insalised prices in the market
 
@@ -251,7 +251,7 @@ async function fundingRate() {
           if (currentMargin > shortfall) {
             pos.margin = (currentMargin - shortfall).toString();
             // by reducing the margin we are actually increasing the users leverage and makeing the position more vulnerable to
-            // the risk for liquation as  leverage = notional/margin 
+            // the risk for liquation as  leverage = notional/margin
             // we updated the position here
             Positions.set(postionKey, pos);
           } else {
@@ -261,7 +261,7 @@ async function fundingRate() {
 
             pos.margin = "0";
 
-            // we have to delete the postion 
+            // we have to delete the postion
 
             Positions.delete(postionKey);
 
@@ -292,7 +292,7 @@ async function fundingRate() {
   }
 }
 
-// this is used for normalsising the binace incoming tokens 
+// this is used for normalsising the binace incoming tokens
 function RegisterBinanceFeed(
   binanceIncoming: string,
   internalMarketId: string,
@@ -300,7 +300,7 @@ function RegisterBinanceFeed(
   BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = internalMarketId;
 }
 
-// this function is used for update the position for the order 
+// this function is used for update the position for the order
 function updatePositionFills(
   userId: string,
   marketId: string,
@@ -332,7 +332,7 @@ function updatePositionFills(
       side,
       qty: fillQty,
       entryPrice: fillPrice,
-      margin: margin ,
+      margin: margin,
       leverage: leverage,
     });
     return;
@@ -351,7 +351,7 @@ function updatePositionFills(
     const newQty = existingQty + parseFloat(fillQty);
     const avgEntryPrice =
       (existingQty * existingPrice +
-        (parseFloat(fillQty) * parseFloat(fillPrice))) /
+        parseFloat(fillQty) * parseFloat(fillPrice)) /
       newQty;
     const addedMargin =
       (parseFloat(fillQty) * parseFloat(fillPrice)) / parseFloat(leverage);
@@ -378,76 +378,78 @@ function updatePositionFills(
     const remaingQty = existingQty - parseFloat(fillQty);
 
     // calauate the new margin that this margin we have to adjust the new margin
-    const closedQty = Math.min(existingQty,parseFloat(fillQty));
-    // this is the amount of margin we have to reduce this much margin in the maker balance 
-    const marginReduction = (closedQty / existingQty) * existingMargin ;
+    const closedQty = Math.min(existingQty, parseFloat(fillQty));
+    // this is the amount of margin we have to reduce this much margin in the maker balance
+    const marginReduction = (closedQty / existingQty) * existingMargin;
 
-    // to check the realised pnl in the system what we can do is 
-    const realisedPnl = existingPosition.side === "LONG" ? (parseFloat(fillPrice)-existingPrice)*closedQty :(existingPrice - parseFloat(fillPrice))*closedQty ;
+    // to check the realised pnl in the system what we can do is
+    const realisedPnl =
+      existingPosition.side === "LONG"
+        ? (parseFloat(fillPrice) - existingPrice) * closedQty
+        : (existingPrice - parseFloat(fillPrice)) * closedQty;
 
+    // now time to update the users balances
 
-    // now time to update the users balances 
-
-    const userBal = Balances.get(existingPosition.userId) ??{
-        available_bal : "0",
-        locked_bal : "0"
-    }
+    const userBal = Balances.get(existingPosition.userId) ?? {
+      available_bal: "0",
+      locked_bal: "0",
+    };
 
     const currAvailBalance = parseFloat(userBal.available_bal);
 
-    const newAvailBalance = Math.max(0,currAvailBalance+marginReduction+realisedPnl);
+    const newAvailBalance = Math.max(
+      0,
+      currAvailBalance + marginReduction + realisedPnl,
+    );
 
+    // time yo update the balance for the user
 
-    // time yo update the balance for the user 
-
-    Balances.set(existingPosition.userId , {
-        available_bal : newAvailBalance.toString() ,
-        locked_bal : userBal.locked_bal,
+    Balances.set(existingPosition.userId, {
+      available_bal: newAvailBalance.toString(),
+      locked_bal: userBal.locked_bal,
     });
 
-    // we have to mutate those positions as we move ahead as what we can do is 
+    // we have to mutate those positions as we move ahead as what we can do is
 
-    if(parseFloat(fillQty) >= existingQty){
+    if (parseFloat(fillQty) >= existingQty) {
+      // then this postion is closed bro
+      Positions.delete(posKey);
 
-        // then this postion is closed bro 
-        Positions.delete(posKey); 
+      // now we have to flip this position for that trader as follows
 
-        // now we have to flip this position for that trader as follows 
+      const leftOverQty = parseFloat(fillQty) - existingQty;
 
-        const leftOverQty = parseFloat(fillQty) - existingQty ;
+      if (leftOverQty > 0) {
+        const leftOverMargin =
+          (leftOverQty * parseFloat(fillPrice)) / parseFloat(leverage);
 
-        if(leftOverQty > 0){
-
-            const leftOverMargin = (leftOverQty* parseFloat(fillPrice))/parseFloat(leverage);
-
-            Positions.set(posKey , {
-            userId ,
-            marketId,
-            baseToken,
-            side,
-            qty : fillQty,
-            entryPrice : fillPrice,
-            margin : leftOverMargin.toString(),
-            leverage : leverage
-            });
-        }
-    }else {
-
-        // this block does when we have partial filled orders 
-
-        const remaningQty = existingQty - parseFloat(fillQty);
-        const remaingMargin = Math.max(0,existingMargin-marginReduction);
-
-        Positions.set(posKey , {
-            ...existingPosition,
-            qty : remaingQty.toString(),
-            margin : remaingMargin.toString(),
+        Positions.set(posKey, {
+          userId,
+          marketId,
+          baseToken,
+          side,
+          qty: fillQty,
+          entryPrice: fillPrice,
+          margin: leftOverMargin.toString(),
+          leverage: leverage,
         });
+      }
+    } else {
+      // this block does when we have partial filled orders
+
+      const remaningQty = existingQty - parseFloat(fillQty);
+      const remaingMargin = Math.max(0, existingMargin - marginReduction);
+
+      Positions.set(posKey, {
+        ...existingPosition,
+        qty: remaingQty.toString(),
+        margin: remaingMargin.toString(),
+      });
     }
   }
 }
 
-// this is used for the ws connection for the same 
+// this is used for the ws connection for the same
 function startBinanceWebSocket() {
   // we retrive all the keys from the record we created
 
@@ -507,7 +509,7 @@ function startBinanceWebSocket() {
 
   // this is the binace connection endpoint for the project
 }
-// used to start the liquadation poller 
+// used to start the liquadation poller
 function startLiquidationPoller() {
   setInterval(() => {
     sweepLiquadations().catch((err) => {
@@ -515,7 +517,7 @@ function startLiquidationPoller() {
     });
   }, liquadation_intervals);
 }
-// thisi is used to start the funding rate poller 
+// thisi is used to start the funding rate poller
 function startFundingRatePoller() {
   setInterval(() => {
     fundingRate().catch((err) => {
@@ -528,8 +530,6 @@ startFundingRatePoller();
 console.log("all the backgrouund daemons are now working here ");
 
 while (true) {
-
-
   try {
     const response = await clientRead.xReadGroup(
       ENGINE_GROUP, // this is the consumer group name
@@ -626,71 +626,61 @@ while (true) {
       const userLeverage = command.leverage ? parseFloat(leverage) : 1;
 
       // check if the user needs extra margin to open an trade as is he squaring down on the current postion or opening a new posistion
-    
-      // lets now check the posotion before calculating reduce onlu for the user as if the user actually has an open posotion to that would 
-      //balance the squaring off the posotions 
 
-       // this snippet will give off any position that the user has in the current market 
+      // lets now check the posotion before calculating reduce onlu for the user as if the user actually has an open posotion to that would
+      //balance the squaring off the posotions
+
+      // this snippet will give off any position that the user has in the current market
       const position = Positions.get(`${userId} : ${marketId}`);
 
-      const currentQty = position ? parseFloat(position.qty) : 0; 
-      
-      // this check if the user has passes the reduce only command that means that the user has a position that he could leverage it against 
-      // the current opening positions 
-      if(command.reduceOnly){
-       
-        // we check if the user currenlty holds an existing position here  
-        if(!position || currentQty <= 0 ){
+      const currentQty = position ? parseFloat(position.qty) : 0;
 
-            await publisher.xAdd("to-backend", "*",{
-
-                loopbackId ,
-                status : "REJECTED",
-                data : "",
-                error : "NO_OPEN_POSITION_TO_REDUCE"
-            });
-            continue;
+      // this check if the user has passes the reduce only command that means that the user has a position that he could leverage it against
+      // the current opening positions
+      if (command.reduceOnly) {
+        // we check if the user currenlty holds an existing position here
+        if (!position || currentQty <= 0) {
+          await publisher.xAdd("to-backend", "*", {
+            loopbackId,
+            status: "REJECTED",
+            data: "",
+            error: "NO_OPEN_POSITION_TO_REDUCE",
+          });
+          continue;
         }
 
-        // IF THE USER HAS AN OPEN POSITION THEN WE CHECK if the postion is for the oppostie of what the user is asking for 
+        // IF THE USER HAS AN OPEN POSITION THEN WE CHECK if the postion is for the oppostie of what the user is asking for
 
-        // we check what type of reducing ony posotion does it have with itself here 
-        const isReducingLong = position?.side === "LONG" && side === "ASK" ; 
+        // we check what type of reducing ony posotion does it have with itself here
+        const isReducingLong = position?.side === "LONG" && side === "ASK";
 
-        // this checks that if the posotion is short and right now the order is trying to piggyback on itself 
-        const isReducingShort = position?.side === "SHORT" && side ==="BID"; 
+        // this checks that if the posotion is short and right now the order is trying to piggyback on itself
+        const isReducingShort = position?.side === "SHORT" && side === "BID";
 
-        // this means the current position is not complementing the command that was received 
-        if(!isReducingLong && !isReducingShort){
-         
-            await publisher.xAdd("to-backend", "*", {
-
-                loopbackId,
-                status : "REJECTED",
-                data : "",
-                error : "OPEN_POSITION_MUST_BE_OPPOSING_THE_CURRENT_POS"
-            });
-            continue;
+        // this means the current position is not complementing the command that was received
+        if (!isReducingLong && !isReducingShort) {
+          await publisher.xAdd("to-backend", "*", {
+            loopbackId,
+            status: "REJECTED",
+            data: "",
+            error: "OPEN_POSITION_MUST_BE_OPPOSING_THE_CURRENT_POS",
+          });
+          continue;
         }
 
-        // now we check the qty that is required that here 
+        // now we check the qty that is required that here
 
-        if(numQty > currentQty){
-
-            await publisher.xAdd("to-backend", "*",{
-
-                loopbackId,
-                status : "REJECTED",
-                data: "",
-                error : "THE_REQUIRED_POSITION_AMOUNT_IS_NOT_ENOUGH"
-            });
-            continue;
+        if (numQty > currentQty) {
+          await publisher.xAdd("to-backend", "*", {
+            loopbackId,
+            status: "REJECTED",
+            data: "",
+            error: "THE_REQUIRED_POSITION_AMOUNT_IS_NOT_ENOUGH",
+          });
+          continue;
         }
-
       }
 
-
-    
       // as the user only requires margin when the is expanind the current position or creating a new position not closing the old one
       const reqMargin = command.reduceOnly
         ? 0
@@ -854,17 +844,14 @@ while (true) {
               lockedBalance - collateralToUnlock,
             );
 
-
-            // we also have to set the makers balances now in the memory now that is done now 
-            Balances.set(fill.makerUserId , {
-                available_bal : makerBal.available_bal,
-                locked_bal : updatedBalance.toString(), 
+            // we also have to set the makers balances now in the memory now that is done now
+            Balances.set(fill.makerUserId, {
+              available_bal: makerBal.available_bal,
+              locked_bal: updatedBalance.toString(),
             });
-          } 
+          }
 
-
-
-          // 
+          //
 
           // this is for the taker id
           updatePositionFills(
@@ -1121,7 +1108,6 @@ while (true) {
       const numAmount = parseFloat(amount);
 
       // now we have to move ahead the as we nw have to amount
-
 
       if (numAmount <= 0 || isNaN(numAmount)) {
         console.log("The amount is too low ");
