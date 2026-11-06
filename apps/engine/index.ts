@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 
 import type { orderSide, toEngine } from "common";
-import { main } from "bun";
+import { main, postgres } from "bun";
 
 // we iniataire two instances that would read and publish the message for this stream
 const clientRead = createClient();
@@ -96,8 +96,15 @@ export const SUPPORTED_BASE_TOKEN = ["BTC", "SOL", "ETH"] as const;
 
 export type BaseToken = (typeof SUPPORTED_BASE_TOKEN)[number];
 
-console.log("engine has started");
+console.log("engine has started"); 
 
+// this is the funtion that is used start 
+const liquadation_intervals = 1000;
+
+//this is the functionthat start the liqdation of the funding rate 
+const fundingRate_poller = 60 * 60 * 1000;
+
+// this is the function that is used for liqautating the orders 
 async function sweepLiquadations() {
   if (Positions.size === 0 || markPrices.size === 0) return;
 
@@ -166,6 +173,7 @@ async function sweepLiquadations() {
   }
 }
 
+// this is the funtion is used for funding rate 
 async function fundingRate() {
   // iterata over all the insalised prices in the market
 
@@ -284,6 +292,7 @@ async function fundingRate() {
   }
 }
 
+// this is used for normalsising the binace incoming tokens 
 function RegisterBinanceFeed(
   binanceIncoming: string,
   internalMarketId: string,
@@ -291,6 +300,7 @@ function RegisterBinanceFeed(
   BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = internalMarketId;
 }
 
+// this function is used for update the position for the order 
 function updatePositionFills(
   userId: string,
   marketId: string,
@@ -437,6 +447,7 @@ function updatePositionFills(
   }
 }
 
+// this is used for the ws connection for the same 
 function startBinanceWebSocket() {
   // we retrive all the keys from the record we created
 
@@ -496,9 +507,7 @@ function startBinanceWebSocket() {
 
   // this is the binace connection endpoint for the project
 }
-
-const liquadation_intervals = 1000;
-
+// used to start the liquadation poller 
 function startLiquidationPoller() {
   setInterval(() => {
     sweepLiquadations().catch((err) => {
@@ -506,9 +515,7 @@ function startLiquidationPoller() {
     });
   }, liquadation_intervals);
 }
-
-const fundingRate_poller = 60 * 60 * 1000;
-
+// thisi is used to start the funding rate poller 
 function startFundingRatePoller() {
   setInterval(() => {
     fundingRate().catch((err) => {
@@ -518,9 +525,10 @@ function startFundingRatePoller() {
 }
 startFundingRatePoller();
 
+console.log("all the backgrouund daemons are now working here ");
+
 while (true) {
-  // this is the sniipet to start the liquadation poller
-  //startLiquidationPoller();
+
 
   try {
     const response = await clientRead.xReadGroup(
@@ -618,7 +626,71 @@ while (true) {
       const userLeverage = command.leverage ? parseFloat(leverage) : 1;
 
       // check if the user needs extra margin to open an trade as is he squaring down on the current postion or opening a new posistion
+    
+      // lets now check the posotion before calculating reduce onlu for the user as if the user actually has an open posotion to that would 
+      //balance the squaring off the posotions 
 
+       // this snippet will give off any position that the user has in the current market 
+      const position = Positions.get(`${userId} : ${marketId}`);
+
+      const currentQty = position ? parseFloat(position.qty) : 0; 
+      
+      // this check if the user has passes the reduce only command that means that the user has a position that he could leverage it against 
+      // the current opening positions 
+      if(command.reduceOnly){
+       
+        // we check if the user currenlty holds an existing position here  
+        if(!position || currentQty <= 0 ){
+
+            await publisher.xAdd("to-backend", "*",{
+
+                loopbackId ,
+                status : "REJECTED",
+                data : "",
+                error : "NO_OPEN_POSITION_TO_REDUCE"
+            });
+            continue;
+        }
+
+        // IF THE USER HAS AN OPEN POSITION THEN WE CHECK if the postion is for the oppostie of what the user is asking for 
+
+        // we check what type of reducing ony posotion does it have with itself here 
+        const isReducingLong = position?.side === "LONG" && side === "ASK" ; 
+
+        // this checks that if the posotion is short and right now the order is trying to piggyback on itself 
+        const isReducingShort = position?.side === "SHORT" && side ==="BID"; 
+
+        // this means the current position is not complementing the command that was received 
+        if(!isReducingLong && !isReducingShort){
+         
+            await publisher.xAdd("to-backend", "*", {
+
+                loopbackId,
+                status : "REJECTED",
+                data : "",
+                error : "OPEN_POSITION_MUST_BE_OPPOSING_THE_CURRENT_POS"
+            });
+            continue;
+        }
+
+        // now we check the qty that is required that here 
+
+        if(numQty > currentQty){
+
+            await publisher.xAdd("to-backend", "*",{
+
+                loopbackId,
+                status : "REJECTED",
+                data: "",
+                error : "THE_REQUIRED_POSITION_AMOUNT_IS_NOT_ENOUGH"
+            });
+            continue;
+        }
+
+      }
+
+
+    
       // as the user only requires margin when the is expanind the current position or creating a new position not closing the old one
       const reqMargin = command.reduceOnly
         ? 0
@@ -1049,6 +1121,7 @@ while (true) {
       const numAmount = parseFloat(amount);
 
       // now we have to move ahead the as we nw have to amount
+
 
       if (numAmount <= 0 || isNaN(numAmount)) {
         console.log("The amount is too low ");
