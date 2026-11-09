@@ -2,9 +2,11 @@
 // this is batch focus file thats only job is to digest the db queue and make the persistance data pooling
 //possible
 
+// rn the order books are in memory so that we cant accyually use these in an aggrigated format to
+//do that we have to make sure that we have endpoints that would enable the dashboadrd for the user to user from
 import { prisma } from "db";
 
-import { createClient } from "redis";
+import { ConnectionTimeoutError, createClient } from "redis";
 
 import type * as Payloads from "common";
 
@@ -17,8 +19,8 @@ const CONSUMER_NAME = "db-worker-1";
 // all the variables are set here as of now
 // tem to create an engine group here
 
-async function ConnectRedis() {
-  await redis.connect();
+async function startWorker() {
+  await redis.connect(); // this is the redis object that is used for interactating with the redis queue
   console.log("The redis client is connected here ");
 
   try {
@@ -27,11 +29,68 @@ async function ConnectRedis() {
     await redis.xGroupCreate(STREAM_KEY, CONSUMER_GROUP, "0", {
       MKSTREAM: true,
     });
+
+    console.log(
+      `db worker is now running with the key as ${STREAM_KEY} and with group ${CONSUMER_GROUP}`,
+    );
   } catch (error: any) {
     if (!error?.message?.includes("BUSYGROUP")) {
-      console.error(
-        `smile a little there is an error in creating the db group as ${error}`,
+      throw error;
+    }
+    console.log("DB consumer group already exists");
+  }
+  // time to start the redis worker now
+
+  while (true) {
+    try {
+      const response = await redis.xReadGroup(
+        CONSUMER_GROUP,
+        CONSUMER_NAME,
+        [
+          {
+            key: STREAM_KEY,
+            id: ">",
+          },
+        ],
+        {
+          BLOCK: 2000,
+          COUNT: 20,
+        },
       );
+
+      if (!response || !response[0]?.messages.length) {
+        continue;
+      }
+
+      const StreamEntries = response[0].messages;
+
+      // now we iterate over the entries that we have just received
+      for (const entry of StreamEntries) {
+        const eventType = entry.message.eventType as string;
+        const payloadString = entry.message.payload as string;
+
+        if (!eventType || !payloadString) {
+          console.log(`The received payload is not in the correct form `);
+          // we ack this message and then move on
+          await redis.xAck(STREAM_KEY, CONSUMER_GROUP, entry.id);
+          continue;
+        }
+
+        try {
+          await processEvent(eventType, payloadString);
+
+          // we have to ack the steam that we just ingested in the redis queue
+          await redis.xAck(STREAM_KEY, CONSUMER_GROUP, entry.id);
+        } catch (dbError) {
+          console.error(
+            `Db-worker is not working in the event ${eventType} with the id as ${entry}
+             , the erroe is \n `,
+            dbError,
+          );
+        }
+      }
+    } catch (loopError) {
+      console.error(`there was an enexpected steam error as `, loopError);
     }
   }
 }
@@ -57,6 +116,10 @@ async function handelTradeExecuted(payload: Payloads.TradeExecutedPayload) {
     for (const fill of fills) {
       const fillQtyNum = parseFloat(fill.qty);
 
+      if (!Number.isFinite(fillQtyNum) || fillQtyNum <= 0) {
+        throw new Error(`invaild fill quantity :${fill.qty}`);
+      }
+
       // this is just increasing the total taker qty in the the current fill
       totalTakerFillQty += fillQtyNum;
 
@@ -81,56 +144,99 @@ async function handelTradeExecuted(payload: Payloads.TradeExecutedPayload) {
       });
       // this is the order that is resting in the db table, we have to square off it or update it
 
-      if (makerOrder) {
-        const updatedFilledQty = (
-          parseFloat(makerOrder.filledQty) + fillQtyNum
-        ).toString();
-
-        const isFullfilled = (
-          parseFloat(updatedFilledQty) >= fillQtyNum
-        ).toString();
-
-        await tx.order.update({
-          where: { id: fill.makerOrderId },
-          data: {
-            filledQty: updatedFilledQty,
-            status: isFullfilled ? "FILLED" : "PARTIALLY_FILLED",
-          },
-        });
+      if (!makerOrder) {
+        throw new Error(`Maker Order ${fill.makerOrderId} not found`);
       }
 
-      // now its the time for the taker order it goes like this
+      const updatedFilledQty = Number(makerOrder.filledQty) + fillQtyNum;
 
-      const takerOrder = await tx.order.findUnique({
-        where: { id: takerOrderId },
+      const isFullfilled = updatedFilledQty >= Number(makerOrder.qty);
+
+      await tx.order.update({
+        where: { id: fill.makerOrderId },
+        data: {
+          filledQty: updatedFilledQty.toString(),
+          status: isFullfilled ? "FILLED" : "PARTIALLY_FILLED",
+        },
       });
-
-      // we have to also mutilate the taker order id here
-
-      if (takerOrder) {
-        const updatedFilledQty = (
-          parseFloat(takerOrder.filledQty) + totalTakerFillQty
-        ).toString();
-
-        const isFullfilled =
-          parseFloat(updatedFilledQty) >= parseFloat(takerOrder.qty);
-
-        await tx.order.update({
-          where: { id: takerOrderId },
-          data: {
-            filledQty: updatedFilledQty,
-            status: isFullfilled ? "FILLED" : "PARTIALLY_FILLED",
-          },
-        });
-      }
-
-      // we have handeled the the taker order here
     }
+
+    // now its the time for the taker order it goes like this
+
+    const takerOrder = await tx.order.findUnique({
+      where: { id: takerOrderId },
+    });
+
+    // we have to also mutilate the taker order id here
+
+    if (!takerOrder) {
+      throw new Error(`The taker order ${takerOrderId}`);
+    }
+    if (takerOrder) {
+      const updatedFilledQty = Number(takerOrder.filledQty) + totalTakerFillQty;
+
+      const isFullfilled = updatedFilledQty >= Number(takerOrder.qty);
+
+      await tx.order.update({
+        where: { id: takerOrderId },
+        data: {
+          filledQty: updatedFilledQty.toString(),
+          status: isFullfilled ? "FILLED" : "PARTIALLY_FILLED",
+        },
+      });
+    }
+
+    // we have handeled the the taker order here
   });
 }
 
-// this is the endpoint to cancell order here
+// this is handel the accepted order
 
+async function handelOrderAccepted(payload: Payloads.OrderAcceptedPayload) {
+  const {
+    userId,
+    marketId,
+    orderId,
+    orderType,
+    price,
+    qty,
+    timeInForce,
+    reduceOnly,
+    initialMargin,
+    lockedMargin,
+    orderSide,
+  } = payload;
+
+  // now to actualyy add that order to primsma
+
+  await prisma.order.upsert({
+    where: { id: orderId },
+    update: {},
+
+    create: {
+      id: orderId,
+      userId,
+      marketId,
+
+      orderType,
+      orderSide,
+
+      price,
+      qty,
+
+      timeInForce,
+      reduceOnly,
+
+      initialMargin,
+      lockedMargin,
+
+      status: "OPEN",
+    },
+  });
+
+  console.log(`the order is persistaed as ${orderId}`);
+}
+// this is the endpoint to cancell order here
 async function handelOrderCancelled(payload: Payloads.OrderCancelledPayload) {
   const { orderId } = payload;
 
@@ -153,8 +259,8 @@ async function closeUserPositionsAndOrders(userId: string, marketId: string) {
       },
     }),
 
-    // now to mark all the orders that the user have and set them to cancelled to the book 
-     prisma.order.updateMany({
+    // now to mark all the orders that the user have and set them to cancelled to the book
+    prisma.order.updateMany({
       where: {
         userId,
         marketId,
@@ -170,6 +276,35 @@ async function closeUserPositionsAndOrders(userId: string, marketId: string) {
   ]);
 }
 
+async function handelPositionUpdated(payload: Payloads.PositionUpdatePayload) {
+  const { userId, marketId, size, entryPrice, leverage, liquidationPrice } =
+    payload;
+
+    console.log(`saving this shi to the database ${payload}`);
+
+  await prisma.position.upsert({
+    where: {
+      userId_marketId: {
+        userId,
+        marketId,
+      },
+    },
+    update: {
+      size,
+      entryPrice,
+      leverage,
+      liquidationPrice,
+    },
+    create: {
+      userId,
+      marketId,
+      size,
+      entryPrice,
+      leverage,
+      liquidationPrice,
+    },
+  });
+}
 // the code below is used to handel the liquadation of postions
 
 async function handelPositionLiquadated(
@@ -192,26 +327,94 @@ async function handelPositionBankrupt(
 
   await closeUserPositionsAndOrders(userId, marketId);
   console.log("The users position is liquadated broo ");
-} 
-
-async function handelMarketCreated(payload : Payloads.MarketCreatedPayload){
-
-    const {marketId , tickSize,stepSize,symbol ,slug , baseToken} = payload ; 
-
-    // we have destructured all the properties from the market 
-
-    await prisma.market.upsert({
-        where : {symbol} , 
-        update : {baseToken , tickSize , stepSize},
-
-        create : {
-
-            id : marketId ,
-            symbol,
-            baseToken,
-            tickSize,
-            stepSize,
-            slug : symbol.toLowerCase(),
-        },
-    });
 }
+
+async function handelMarketCreated(payload: Payloads.MarketCreatedPayload) {
+  const { marketId, tickSize, stepSize, symbol, slug, baseToken } = payload;
+
+  // we have destructured all the properties from the market
+
+  await prisma.market.upsert({
+    where: { symbol },
+    update: { baseToken, tickSize, stepSize },
+
+    create: {
+      id: marketId,
+      symbol,
+      baseToken,
+      tickSize,
+      stepSize,
+      slug: slug.toString(),
+    },
+  });
+}
+
+async function processEvent(eventType: string, rawPayload: string) {
+  const payload = JSON.parse(rawPayload);
+
+  switch (eventType) {
+    case "TRADE_EXECUTED":
+      await handelTradeExecuted(payload as Payloads.TradeExecutedPayload);
+      break;
+
+    case "ORDER_CANCELLED":
+      await handelOrderCancelled(payload as Payloads.OrderCancelledPayload);
+      break;
+
+    case "POSITION_LIQUIDATED":
+      await handelPositionLiquadated(
+        payload as Payloads.PositionLiquidatedPayload,
+      );
+      break;
+
+    case "POSITION_UPDATED":
+      await handelPositionUpdated(payload as Payloads.PositionUpdatePayload);
+      break;   
+
+    case "POSITION_BANKRUPT":
+      await handelPositionBankrupt(payload as Payloads.PositionBankruptPayload);
+      break;
+
+    case "MARKET_CREATED":
+      await handelMarketCreated(payload as Payloads.MarketCreatedPayload);
+      break;
+
+    case "ORDER_ACCEPTED":
+      await handelOrderAccepted(payload as Payloads.OrderAcceptedPayload);
+      break;
+
+    case "WALLET_UPDATE":
+      await handelWalletUpdate(payload as Payloads.WalletTransactionPayload);
+      break;
+
+    default:
+      console.warn(`[db-worker], this event ${eventType} is not supported`);
+  }
+}
+
+async function handelWalletUpdate(payload: Payloads.WalletTransactionPayload) {
+  //destructing the payload here
+
+  const { userId, amountAvail, amountLocked } = payload;
+
+  // now we have to use these things to make the operation possible
+
+  await prisma.wallet.upsert({
+    where: { userId },
+
+    update: { amountAvail, amountLocked },
+
+    create: {
+      userId: userId,
+      amountAvail: amountAvail,
+      amountLocked: amountLocked,
+    },
+  });
+
+  // this has the ;logic for the wallet incerments
+}
+
+startWorker().catch((err) => {
+  console.error("fatal startup error broo", err);
+  process.exit(1); // exit with failure here
+});

@@ -17,11 +17,26 @@ app.post("/api/v1/signup", async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    if (!username || !password) {
+    if (!username || !password || typeof username !== "string") {
       return res
         .status(400)
         .json({ error: "Username  and password are required" });
     }
+
+     // we check for dupicate username here in the database 
+    const userExist = await prisma.user.findUnique({
+
+      where : {
+        username : username ,
+      }
+
+    });
+
+    if(userExist){
+
+      return res.status(409).json("This username already exist broo");
+    }
+
 
     //hash the password with bun
     const hashPassword = await Bun.password.hash(password);
@@ -74,7 +89,8 @@ app.post("/api/v1/signin", async (req, res) => {
         .status(401)
         .json({ message: "This user does not exists broo " });
     }
-
+ 
+    // we kinda de-hash the password to verify it with the given password by the user 
     const isPasswordVaild = await Bun.password.verify(password, User!.password);
 
     if (!isPasswordVaild) {
@@ -91,7 +107,7 @@ app.post("/api/v1/signin", async (req, res) => {
 
     // give user a signed token that is valid for 8h through which all the requests could be vaildated
     const token = jwt.sign(
-      {
+      { // this is the data we are storing inside the token 
         userId: User!.id,
       },
       secret,
@@ -112,31 +128,67 @@ app.post("/api/v1/signin", async (req, res) => {
 
 app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
   try {
-    const {
-      symbol,
-      slug,
-      imgUrl,
-      tickSize = "0.1 ",
-      stepSize = "0.001",
-    } = req.body;
 
-    if (!symbol || !slug) {
-      return res
-        .status(401)
-        .json({ message: "The body is for request is not complete bro  " });
-    }
+    // check for admin token 
 
-    const token = req.headers["x-admin-token"] || req.headers.token;
-    if (!token) {
+     const adminToken = req.headers.admin_secret;
+    if (!adminToken) {
       return res
         .status(401)
         .json({ message: "The body is for request is empty " });
     }
-    console.log(token);
+    console.log(adminToken);
     console.log(process.env.ADMIN_SECRET);
-    if (token != process.env.ADMIN_SECRET) {
+    if (adminToken != process.env.ADMIN_SECRET) {
       return res.status(403).json({ message: " this token is invaild broo" });
     }
+
+
+    // we destructure the incoming request into the market parameters 
+    const {
+      symbol,
+      slug,
+      imgUrl,
+      tickSize = "0.1",
+      stepSize = "0.001",
+      baseToken ,
+    } = req.body;
+
+    if (!symbol || !slug || !baseToken || !imgUrl ) {
+      return res
+        .status(400)
+        .json({ message: "The body is for request is not complete bro  " });
+    }
+
+    // now to check if the tick size is vaild or not 
+
+    const numTick = Number(tickSize);
+    const numStep = Number(stepSize);
+
+    if(!isFinite(numTick) ||!isFinite(numStep)|| numTick <= 0 || numStep <= 0){
+
+      return res.status(400).json({message : "The tick and step size are not vaild bro"});
+
+    }
+    
+    // check for dupicated markets now 
+
+    const existingMarket = await prisma.market.findFirst({
+      where : {
+ // it checks if the symbol or slug exist in the market 
+        OR : [
+          {symbol},
+          {slug},
+        ],
+      }
+    });
+
+    if(existingMarket){
+
+      return res.status(409).json({message: "The Market already exists bro "})
+    }
+
+   
 
     const response = await prisma.market.create({
       data: {
@@ -145,6 +197,7 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
         imgUrl: imgUrl || null,
         tickSize: tickSize,
         stepSize: stepSize,
+        baseToken: baseToken,
       },
     });
 
@@ -154,8 +207,9 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
       imgUrl: response.imgUrl || "",
       symbol: response.symbol,
       slug: response.slug,
-      tickSize: tickSize,
-      stepSize: stepSize,
+      tickSize: response.tickSize,
+      stepSize: response.stepSize,
+      baseToken: baseToken,
     });
     return res.json({
       id: response.id,
@@ -164,6 +218,13 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
     });
   } catch (error: any) {
     console.error("Admin create market error:", error);
+
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        message: "Market already exists",
+      });
+    }
+
     return res
       .status(500)
       .json({ error: "Internal Server Error", details: String(error) });
@@ -174,6 +235,12 @@ app.post("/api/v1/onRamp", authmiddleware, async (req, res) => {
   const userId: string = req.userId!; // decoded by the  middleware
 
   console.log("req has reached loopback ");
+
+  const findAmount =req.body.amount;
+  if(findAmount <= 0 || !isFinite(parseFloat(findAmount))){
+
+    return res.status(400).json("The amount is negative broo");
+  }
   const queuedLoopbackResponse = await loopback({
     messageType: "ON_RAMP",
     amount: req.body.amount.toString(),
@@ -206,19 +273,38 @@ app.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
       price,
     } = req.body;
 
-    if (!qty || !side || !marketId || !orderType || !price) {
+    const isSideTrue = side === "BID" || side === "ASK" ; 
+
+    const isOrderTypeVaild = orderType === "LIMIT" || orderType === "MARKET" ; 
+
+    const numQty = Number(qty);
+
+    const numLeverage = Number(leverage);
+
+    const numPrice = Number(price); 
+
+    const isQtyVaild = Number.isFinite(numQty) && numQty >0 ;
+
+    const isLeverageVaild = Number.isFinite(numLeverage) && numLeverage > 0 ;
+
+    const isPriceVaild = orderType === "MARKET" || orderType === "LIMIT" && price !== undefined && price != null && Number.isFinite(numPrice)&& numPrice>0
+
+   // const isPriceVaild = price ? (if(orderType == "MARKET") { true } ;) : false 
+    if (!isQtyVaild || !isSideTrue || !marketId || !isOrderTypeVaild || !isLeverageVaild || !isPriceVaild  ) {
       return res
-        .status(404)
+        .status(400)
         .json({
           message:
             "The market order is getting invalidated due to a lack of fields",
         });
     }
 
+    
+
     const orderId = Bun.randomUUIDv7();
 
     // this request goes to the loopback function in the backend
-    const queuedLoopBackResponse = await loopback({
+    const queuedLoopBackResponse : any  = await loopback({
       messageType: "CREATE_ORDER",
       side: side,
       qty: qty.toString(),
@@ -232,7 +318,18 @@ app.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
       userId: userId,
     });
 
+    
+    if(queuedLoopBackResponse.status === "REJECTED"){
+
+      const isMarketMissing = queuedLoopBackResponse.error === "MARKET_NOT_FOUND_BRO";
+
+      return res.status(isMarketMissing ? 404 : 400).json({
+        message : queuedLoopBackResponse.error,
+      });
+    }
+
     return res.status(200).json({
+      
       orderId,
       message: "The engine has replayed with this",
       result: queuedLoopBackResponse,
@@ -255,12 +352,25 @@ app.delete(`/api/v1/order/:orderId`, authmiddleware, async (req: any, res) => {
       return res.status(404).json("Market_id or orderId is needed bro");
     }
 
-    const engineReply = await loopback({
+    const engineReply : any  = await loopback({
       messageType: "CANCEL_ORDER",
       userId,
       orderId,
       marketId,
     });
+
+    if(engineReply.status === "REJECTED"){
+
+      const error = engineReply.error;
+
+      
+
+      return res.status(404).json({error});
+
+
+    }
+
+  
 
     // this is the line that executes when the loop back
     return res.status(200).json({
@@ -301,5 +411,5 @@ app.delete(`/api/v1/order/:orderId`, authmiddleware, async (req: any, res) => {
 // });
 
 app.listen(3000, () => {
-  console.log("Server is running on port 3000");
+  console.log("Server is running on port 3000 broo ");
 });

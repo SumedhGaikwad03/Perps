@@ -175,11 +175,18 @@ async function main () {
         loopBackResolves.delete(loopbackId);
       }
 
-      if(status == "SUCCESS"){
+      if(status === "SUCCESS"){
 
         const parsedData = data ? JSON.parse(data): null ;  
         pendingPromise?.resolve(parsedData); 
         // we resolved the promise here that was pending as the current order is executed here 
+     }
+     else if ( status == "REJECTED"){
+
+        pendingPromise?.resolve({
+            status : "REJECTED",
+            error : error || "ENGINE_REJECTED_ORDER"
+        });
      }
      else{
 

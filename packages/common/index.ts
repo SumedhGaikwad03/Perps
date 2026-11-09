@@ -1,6 +1,8 @@
 // lets start to make the common types in the engine and the data base for communication 
 
 
+
+
 export type orderSide = "BID" | "ASK" 
 export type TimeInForce = "GTC" | "FOK" 
 
@@ -33,7 +35,7 @@ export type toEngine =  {
 
     slug : string , 
 
-    baseToken : string , 
+    baseToken : BaseToken , 
 
     symbol : string ,
 
@@ -151,7 +153,7 @@ export interface MarketCreatedPayload {
 
     slug : string , 
 
-    baseToken : string , 
+    baseToken : BaseToken , 
 
     symbol : string ,
 
@@ -159,13 +161,84 @@ export interface MarketCreatedPayload {
 
     stepSize : string,}
 
-export type dbEvent = 
- | "TRADE-EXECUTED" 
- | "ORDER-CANCELLED"
- | "POSITION-LIQUIDATED"
- | "POSITION-BANKRUPT"
- | "MARKET-CREATED";
+// export type dbEvent = 
+//  | "TRADE_EXECUTED" 
+//  | "ORDER_CANCELLED"
+//  | "POSITION_LIQUADATED"
+//  | "POSITION_BANKRUPT"
+//  | "MARKET_CREATED"
+//  | "ORDER_ACCEPTED";
 
+ // this code exits to prevent the ts form accendently a 
+ // differnt event with a differnt type of payload 
+
+ // its specifics the keys and the values specifed to that ts 
+ export interface DbEventPayloadMap {
+
+    TRADE_EXECUTED : TradeExecutedPayload,
+    ORDER_CANCELLED : OrderCancelledPayload,
+    POSITION_LIQUIDATED :PositionLiquidatedPayload,
+    POSITION_BANKRUPT : PositionBankruptPayload,
+    MARKET_CREATED : MarketCreatedPayload,
+    ORDER_ACCEPTED: OrderAcceptedPayload,
+    POSITION_UPDATED : PositionUpdatePayload
+
+ }
+
+ //Behind the scenes, dbEvent becomes:
+//"TRADE_EXECUTED" | "ORDER_CANCELLED" | "POSITION_LIQUIDATED" | 
+// "POSITION_BANKRUPT" | "MARKET_CREATED" | "ORDER_ACCEPTED"
+
+ export type dbEvent = keyof DbEventPayloadMap ;
+
+ export type DbEventMessage ={
+    [k in dbEvent]:{
+     eventType : k ;
+     payload : DbEventPayloadMap[k]
+ };
+
+ }[dbEvent];
+ // extract only values the suppiled db event  
+
+ // this is narrow typing in ts 
+
+
+ export interface OrderAcceptedPayload {
+
+    orderId : string ;
+    userId : string ;
+    marketId : string ;
+
+    orderType : OrderType;
+    orderSide : orderSide ;
+
+    price : string | null ;
+    qty : string ;
+
+    timeInForce : TimeInForce ;
+    reduceOnly : boolean ;
+
+    initialMargin : string ;
+    lockedMargin : string ; 
+ }
+
+ export interface WalletTransactionPayload {
+
+    userId : string ,
+    amountAvail : string , 
+    amountLocked : string ,
+
+}
+
+export interface PositionUpdatePayload{
+
+    userId : string,
+    marketId : string ,
+    size : string ,
+    entryPrice : string,
+    leverage : number ,
+     liquidationPrice : string | null 
+}
 
 
 

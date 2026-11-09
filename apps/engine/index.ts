@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 
-import type { orderSide, toEngine } from "common";
+import type { orderSide, toEngine , DbEventMessage} from "common";
 import { main, postgres } from "bun";
 
 // we iniataire two instances that would read and publish the message for this stream
@@ -28,6 +28,8 @@ type OpenOrder = {
   userId: string;
   originalOrderId: string;
   filledQty: string;
+  lockedMargin: string;
+  reduceOnly: boolean;
   qty: string;
   leverage: string;
 };
@@ -114,7 +116,7 @@ async function sweepLiquadations() {
   for (const [posKey, pos] of Positions.entries()) {
     const marketId = pos.marketId;
     const entryPrice = parseFloat(pos.entryPrice);
-    const intialMargin = parseFloat(pos.margin);
+    const initialMargin = parseFloat(pos.margin);
     const book = orderBook.get(pos.marketId);
 
     if (!book) continue;
@@ -139,7 +141,7 @@ async function sweepLiquadations() {
         ? (markPrice - entryPrice) * qty
         : (entryPrice - markPrice) * qty;
 
-    const equity = intialMargin + unRealaisedPnl;
+    const equity = initialMargin + unRealaisedPnl;
 
     const maintainenceMargin = qty * markPrice * DefaultMrr;
 
@@ -154,7 +156,7 @@ async function sweepLiquadations() {
         marketId: pos.marketId,
         equity: equity,
         mrr: maintainenceMargin,
-        markPrice: markPrices.get(marketId),
+        markPrice: rawPrice,
       });
       // we have make it real time so we have to backend or engine
 
@@ -335,6 +337,9 @@ function updatePositionFills(
       margin: margin,
       leverage: leverage,
     });
+
+
+    
     return;
   }
 
@@ -449,6 +454,10 @@ function updatePositionFills(
   }
 }
 
+// this is the function that is used for snapshot of the system 
+
+
+
 // this is used for the ws connection for the same
 function startBinanceWebSocket() {
   // we retrive all the keys from the record we created
@@ -465,7 +474,7 @@ function startBinanceWebSocket() {
   const webSocket = new WebSocket(wsUrl);
 
   webSocket.onopen = () => {
-    console.log(`Binance Live Feed is connected here `);
+    console.log(`Binance Live Feed is connected here ${wsUrl}`);
   };
 
   // the web socket is now connected to the project lets start to deatructre the message
@@ -487,6 +496,7 @@ function startBinanceWebSocket() {
 
       const baseToken = BINANCE_FEED_MAP[incomingToken];
 
+      // in the markprices map we set the base token and the correspoinding price for the same
       if (baseToken) {
         markPrices.set(baseToken, tick.c);
       }
@@ -526,6 +536,8 @@ function startFundingRatePoller() {
   }, fundingRate_poller);
 }
 startFundingRatePoller();
+startLiquidationPoller();
+startBinanceWebSocket();
 
 console.log("all the backgrouund daemons are now working here ");
 
@@ -597,6 +609,8 @@ while (true) {
         });
 
         // to avoid reprocessing or publishing this entry here
+
+        
         await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
         continue;
       }
@@ -625,13 +639,17 @@ while (true) {
 
       const userLeverage = command.leverage ? parseFloat(leverage) : 1;
 
+      if (userLeverage <=0 || !Number.isFinite(userLeverage) ) {
+        throw new Error("Invaild Leverage");
+      }
+
       // check if the user needs extra margin to open an trade as is he squaring down on the current postion or opening a new posistion
 
       // lets now check the posotion before calculating reduce onlu for the user as if the user actually has an open posotion to that would
       //balance the squaring off the posotions
 
       // this snippet will give off any position that the user has in the current market
-      const position = Positions.get(`${userId} : ${marketId}`);
+      const position = Positions.get(`${userId}:${marketId}`);
 
       const currentQty = position ? parseFloat(position.qty) : 0;
 
@@ -646,6 +664,10 @@ while (true) {
             data: "",
             error: "NO_OPEN_POSITION_TO_REDUCE",
           });
+
+
+          await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,entry.id);
+
           continue;
         }
 
@@ -699,7 +721,20 @@ while (true) {
         await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
         continue;
       }
-
+       
+      console.log("ORDER DEBUG:", {
+  userId,
+  orderId,
+  marketId,
+  qty: numQty,
+  price: numPrice,
+  orderType,
+  side,
+  leverage: userLeverage,
+  availableBalance: currentAvailBalance,
+  requiredMargin: reqMargin,
+  reduceOnly: command.reduceOnly,
+});
       // we reduce the margin here form the available balances
       Balances.set(userId, {
         available_bal: (currentAvailBalance - reqMargin).toString(),
@@ -810,8 +845,9 @@ while (true) {
           }
         }
 
-        // update the last traded price with the most recent fills in the table
+        
       }
+    // update the last traded price with the most recent fills in the table
 
       if (fills.length > 0) {
         book.lastTradedPrice = parseFloat(fills[fills.length - 1]!.price);
@@ -822,6 +858,11 @@ while (true) {
         // also the same way we have to find the maker side as he is always opposite of the maker here
 
         const makerSide: "LONG" | "SHORT" = isBid ? "SHORT" : "LONG";
+
+
+        // this is time to inalise an set for the affected users as this will hold the postions that we have to snapshot in the db 
+
+        const affectedUsers = new Set<string>();
 
         // now we have to update the postions for each of the trader as
         for (const fill of fills) {
@@ -873,9 +914,64 @@ while (true) {
             makerSide,
             fill.qty,
             fill.price,
-            userLeverage.toString(),
+            makerLeverage.toString(),
           );
+
+          // now to record the taker and the maker id for db updation of postion 
+          // as its a set all the dublicated values are already handled 
+
+          affectedUsers.add(userId);
+          affectedUsers.add(fill.makerUserId);
+
+
         }
+
+        // now the loop to update the postion as 
+
+        for(const affectedUserId of affectedUsers){
+
+          const posKey = `${affectedUserId}:${marketId}`
+
+          const currentPosition = Positions.get(posKey);
+
+           // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means 
+           // the postionn was deleted by the in memory array so we just update the size of the postion to be zero 
+          const payload = currentPosition  ? {
+
+            userId : affectedUserId,
+            marketId,
+            size : currentPosition.side === "LONG" ? currentPosition?.qty : `-${currentPosition?.qty}` ,
+            entryPrice : currentPosition?.entryPrice,
+            leverage : Number(currentPosition?.leverage),
+            liquidationPrice : null 
+            } :{
+              userId : affectedUserId ,
+              marketId ,
+              size : "0",
+              leverage : "0",
+              liquidationPrice : null
+            }
+
+            await publisher.xAdd("db-events", "*", {
+
+              eventType : "POSITION_UPDATED",
+              payload : JSON.stringify(payload),
+            });
+          }
+
+        // as all the fills are updated then i its time to persist them to the db for the current
+        // order execution cycle right 
+        // this will persist all the fills to the the database  
+        // await publisher.xAdd("db-events", "*",{
+           
+        //  eventType : "TRADE_EXECUTED",
+        //   payload : JSON.stringify({
+        //     takerUserId : userId ,
+        //     takerOrderID : orderId,
+        //     marketId,
+        //     fills
+        //   }),
+        // });
       }
       // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over
 
@@ -908,12 +1004,17 @@ while (true) {
           }
 
           //pushing our order to the level that was needed
+          const restingMarginLocked = command.reduceOnly
+            ? "0"
+            : ((remaningQty * numPrice) / userLeverage).toString();
           level.orders.push({
             userId,
             originalOrderId: orderId,
             qty: numQty.toString(),
             filledQty: exuctedQty.toString(),
             leverage: userLeverage.toString(),
+            lockedMargin: restingMarginLocked,
+            reduceOnly: Boolean(command.reduceOnly),
           });
 
           //updating the depth of the order for that level
@@ -989,10 +1090,42 @@ while (true) {
 
       // now  for db persistance what we can do is
 
+       // find margin locked in the resting order 
+      const remainingOrderMargin = orderType === "LIMIT" && remaningQty > 0 && !command.reduceOnly ?
+      (remaningQty * numPrice) /userLeverage : 0 ; 
+
+      // persist to accecpt thr order first 
+
+      await publisher.xAdd("db-events" , "*", {
+
+        eventType : "ORDER_ACCEPTED",
+        payload :  JSON.stringify({
+            orderId,
+            userId,
+            marketId,
+
+            orderType,
+            orderSide : side ,
+
+            price : orderType === "LIMIT" ? price! : null ,
+            qty ,
+
+            timeInForce : command.timeInForce, 
+            reduceOnly : Boolean(command.reduceOnly),
+
+            initialMargin : reqMargin.toString(),
+            lockedMargin : remainingOrderMargin.toString(),
+
+
+        }),
+
+      });
+
+     // the trades that actually executed 
       if (fills.length > 0) {
         // we would add a seprate worker to make the db calls possible
         await publisher.xAdd("db-events", "*", {
-          eventType: "TRADE-EXECUTED",
+          eventType: "TRADE_EXECUTED",
           payload: JSON.stringify({
             takerOrderId: orderId,
             takerUserId: userId,
@@ -1012,7 +1145,7 @@ while (true) {
       // to calauate the markprice the mark prices should only be created on top of existince market places
       // then the mark price calaultion becomes easy and secure
       // we are extracting the market here
-      const { symbol, tickSize, stepSize, marketId, baseToken } = command;
+      const { symbol, tickSize, stepSize, marketId, baseToken,slug } = command;
 
       // we have to check if the duplicate market even exist
 
@@ -1089,6 +1222,7 @@ while (true) {
         payload: JSON.stringify({
           marketId,
           symbol,
+          slug,
           baseToken: baseToken,
           tickSize: tickSize,
           stepSize: stepSize,
@@ -1109,7 +1243,7 @@ while (true) {
 
       // now we have to move ahead the as we nw have to amount
 
-      if (numAmount <= 0 || isNaN(numAmount)) {
+      if (numAmount <= 0 || !isFinite(numAmount)) {
         console.log("The amount is too low ");
 
         await publisher.xAdd("to-backend", "*", {
@@ -1151,6 +1285,18 @@ while (true) {
           locked_bal: currentBalances.locked_bal,
         }),
         error: "",
+      });
+
+
+      // this is the db poller that updates the postgress
+      await publisher.xAdd("db-events" , "*", {
+        eventType : "WALLET_UPDATED",
+        payload :JSON.stringify({
+          userId,
+          amountAvail : newBalance ,
+          amountLocked : currentBalances.locked_bal
+
+        }),
       });
 
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
@@ -1258,21 +1404,37 @@ while (true) {
 
       const unfilledQty =
         parseFloat(foundOrder.qty) - parseFloat(foundOrder.filledQty);
-      const leverge = foundOrder.leverage ? parseFloat(foundOrder.leverage) : 1;
-      const marginToUnlock = (unfilledQty * parseFloat(orderPrice)) / leverge;
+      //const leverge = foundOrder.leverage ? parseFloat(foundOrder.leverage) : 1;
+      //const marginToUnlock = (unfilledQty * parseFloat(orderPrice)) / leverge;
+      const marginToUnlock = parseFloat(foundOrder.lockedMargin || "0");
 
       const Balance = Balances.get(userId);
 
-      if (Balance) {
+      if (Balance && marginToUnlock > 0) {
         const currentAvailBal = parseFloat(Balance.available_bal);
         const currentLockedBal = parseFloat(Balance.locked_bal);
 
+        // we find the intial locked qty in the the main order
+
+        const actualUnlock = Math.max(marginToUnlock, currentLockedBal);
+
         Balances.set(userId, {
           available_bal: (currentAvailBal + marginToUnlock).toString(),
-          locked_bal: Math.max(0, currentLockedBal - marginToUnlock).toString(),
+          locked_bal: Math.max(0, currentLockedBal - actualUnlock).toString(),
         });
       }
 
+      // notigy the db 
+
+      await publisher.xAdd("db-events", "*", {
+        eventType: "ORDER_CANCELLED",
+        payload: JSON.stringify({
+          orderId,
+          userId,
+          marketId,
+          status: "CANCELLED",
+        }),
+      });
       // all is now set what is left is to notify the backend what is hapning
 
       await publisher.xAdd("to-backend", "*", {
@@ -1287,15 +1449,7 @@ while (true) {
         error: "",
       });
 
-      await publisher.xAdd("db-events", "*", {
-        eventType: "ORDER_CANCELLED",
-        payload: JSON.stringify({
-          orderId,
-          userId,
-          marketId,
-          status: "CANCELLED",
-        }),
-      });
+      
 
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
       continue;
