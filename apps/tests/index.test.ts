@@ -958,6 +958,9 @@ describe("8. Matching Engine Consistency Tests", () => {
   });
 
 
+});
+
+
   // =====================================================
 // TEST 9: ADDITIONAL MARKET VALIDATION & ADMIN SECURITY
 // =====================================================

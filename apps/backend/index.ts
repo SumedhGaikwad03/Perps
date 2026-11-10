@@ -129,7 +129,8 @@ app.post("/api/v1/signin", async (req, res) => {
 app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
   try {
 
-    // check for admin token 
+   
+    // check for admin token here 
 
      const adminToken = req.headers.admin_secret;
     if (!adminToken) {
@@ -154,6 +155,7 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
       baseToken ,
     } = req.body;
 
+     // check for any missing arguments here 
     if (!symbol || !slug || !baseToken || !imgUrl ) {
       return res
         .status(400)
@@ -171,8 +173,7 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
 
     }
     
-    // check for dupicated markets now 
-
+    // check for dupicated markets now as the market with a similar symbol exist or not here 
     const existingMarket = await prisma.market.findFirst({
       where : {
  // it checks if the symbol or slug exist in the market 
@@ -189,7 +190,7 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
     }
 
    
-
+ // actual market creataion happens here 
     const response = await prisma.market.create({
       data: {
         slug: slug,
@@ -200,7 +201,9 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
         baseToken: baseToken,
       },
     });
-
+ 
+    // at the same time er notify the engne that the market is created so that there is  no dupiction happening in the database and thr 
+    // in memory engine here 
     const queuedLoopbackResponse = await loopback({
       messageType: "CREATE_MARKET",
       marketId: response.id,
@@ -232,6 +235,8 @@ app.post("/api/v1/admin/market", authmiddleware, async (req, res) => {
 });
 
 app.post("/api/v1/onRamp", authmiddleware, async (req, res) => {
+
+  try {
   const userId: string = req.userId!; // decoded by the  middleware
 
   console.log("req has reached loopback ");
@@ -254,7 +259,12 @@ app.post("/api/v1/onRamp", authmiddleware, async (req, res) => {
   return res.status(200).json({
     message: "onramp is done ",
     result: queuedLoopbackResponse,
-  });
+  }); }
+  catch(error){
+
+    console.log("There has been an Onramp error as  : ",error);
+    return res.status(500);
+  }
 });
 
 app.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
@@ -266,12 +276,14 @@ app.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
       marketId,
       qty,
       side,
-      leverage = 1,
+      leverage = 1, // this is the default fallback leverage 
       orderType,
-      timeInForce = "GTC",
-      reduceOnly = false,
+      timeInForce = "GTC", // this is the default fall back time in force command 
+      reduceOnly = false,  // default commands as when the user is sure to open a new postion in the market 
       price,
     } = req.body;
+
+    // check every incoming order stream if the stram is vaild or not 
 
     const isSideTrue = side === "BID" || side === "ASK" ; 
 
@@ -289,17 +301,19 @@ app.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
 
     const isPriceVaild = orderType === "MARKET" || orderType === "LIMIT" && price !== undefined && price != null && Number.isFinite(numPrice)&& numPrice>0
 
-   // const isPriceVaild = price ? (if(orderType == "MARKET") { true } ;) : false 
+ 
     if (!isQtyVaild || !isSideTrue || !marketId || !isOrderTypeVaild || !isLeverageVaild || !isPriceVaild  ) {
       return res
         .status(400)
         .json({
           message:
-            "The market order is getting invalidated due to a lack of fields",
+            "The market order is getting invalidated due to a lack of fields or wrong fields ",
         });
     }
 
+
     
+   // generate an order id that propagated throught the system and gives us an id for the order mech 
 
     const orderId = Bun.randomUUIDv7();
 
@@ -347,6 +361,7 @@ app.delete(`/api/v1/order/:orderId`, authmiddleware, async (req: any, res) => {
     const userId = req.userId;
     const { orderId } = req.params;
     const { marketId } = req.body;
+    const {side} = req.body;
 
     if (!orderId || !marketId) {
       return res.status(404).json("Market_id or orderId is needed bro");
@@ -357,6 +372,7 @@ app.delete(`/api/v1/order/:orderId`, authmiddleware, async (req: any, res) => {
       userId,
       orderId,
       marketId,
+      side , 
     });
 
     if(engineReply.status === "REJECTED"){
