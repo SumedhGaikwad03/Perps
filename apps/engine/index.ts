@@ -315,12 +315,16 @@ function updatePositionFills(
   // here we find the user and the market id for positions in that market here
   const posKey = `${userId}:${marketId}`;
 
-  const existingPosition = Positions.get(posKey);
+  const existingPosition = Positions.get(posKey); 
+
+  let incomingQty = parseFloat(fillQty);
+  let incomingPrice = parseFloat(fillPrice);
+  let incomingLeverage = parseFloat(leverage); 
+
 
   // if that user does not have an position open in that market then
 
   // this is a brand new posotion that we have opened for the user
-
   if (!existingPosition || parseFloat(existingPosition.qty) === 0) {
     const margin = (
       (parseFloat(fillQty) * parseFloat(fillPrice)) /
@@ -341,23 +345,23 @@ function updatePositionFills(
     return;
   }
 
-  // the postion in that market exists then we can do this as
-
+  // the postion in that exists in the market is  then we can do this as
   const existingQty = parseFloat(existingPosition.qty);
   const existingPrice = parseFloat(existingPosition.entryPrice);
   const existingMargin = parseFloat(existingPosition.margin);
+
 
   // now we either add into the postion or dleverage the postion
 
   if (existingPosition.side === side) {
     // we double down on the existing postion as we make this we incerse the stakes in the project
     const newQty = existingQty + parseFloat(fillQty);
-    const avgEntryPrice =
-      (existingQty * existingPrice +
-        parseFloat(fillQty) * parseFloat(fillPrice)) /
-      newQty;
-    const addedMargin =
-      (parseFloat(fillQty) * parseFloat(fillPrice)) / parseFloat(leverage);
+    const avgEntryPrice =(existingQty * existingPrice + parseFloat(fillQty) * parseFloat(fillPrice)) /newQty;
+    const addedMargin =(parseFloat(fillQty) * parseFloat(fillPrice)) / parseFloat(leverage);
+    const totalNewMargin = existingMargin + addedMargin ;
+    const totalNotianoalValue = newQty * avgEntryPrice ;
+
+    const blendedLeverage =  totalNotianoalValue/totalNewMargin;
 
     // now its time to set new postions here as
 
@@ -366,90 +370,150 @@ function updatePositionFills(
       qty: newQty.toString(),
       entryPrice: avgEntryPrice.toString(),
       margin: (existingMargin + addedMargin).toString(),
+      leverage : blendedLeverage.toFixed(2).toString()
     });
     return;
   }
 
-  // now to handel the opposing side as
-  // as this is the term when
 
-  if (parseFloat(fillQty) >= existingQty) {
-    // this is the term in which we close the postion for the user
-    Positions.delete(posKey);
-  } else {
-    // if he is just squaring off the postion he himself made then he can absorb the sell right now
-    const remaingQty = existingQty - parseFloat(fillQty);
+  // now the flat pipeline for handing the opposing side of orders 
 
-    // calauate the new margin that this margin we have to adjust the new margin
-    const closedQty = Math.min(existingQty, parseFloat(fillQty));
-    // this is the amount of margin we have to reduce this much margin in the maker balance
-    const marginReduction = (closedQty / existingQty) * existingMargin;
+  const closedQty = Math.min(existingQty,incomingQty);
 
-    // to check the realised pnl in the system what we can do is
-    const realisedPnl =
-      existingPosition.side === "LONG"
-        ? (parseFloat(fillPrice) - existingPrice) * closedQty
-        : (existingPrice - parseFloat(fillPrice)) * closedQty;
+  const marginReduction = (closedQty/existingQty)*existingMargin ;
 
-    // now time to update the users balances
 
-    const userBal = Balances.get(existingPosition.userId) ?? {
-      available_bal: "0",
-      locked_bal: "0",
-    };
+  const realisedPnl =existingPosition.side === "LONG" ? (incomingPrice - existingPrice)*closedQty 
+  :(existingPrice - incomingPrice)*closedQty; 
 
-    const currAvailBalance = parseFloat(userBal.available_bal);
 
-    const newAvailBalance = Math.max(
-      0,
-      currAvailBalance + marginReduction + realisedPnl,
-    );
+  const userBal = Balances.get(userId) || {available_bal : "0" , locked_bal : "0"};
 
-    // time yo update the balance for the user
+  const newBalance = Math.max(0,parseFloat(userBal.available_bal)+marginReduction+realisedPnl);
 
-    Balances.set(existingPosition.userId, {
-      available_bal: newAvailBalance.toString(),
-      locked_bal: userBal.locked_bal,
-    });
+  Balances.set(userId , {available_bal : newBalance.toString() , locked_bal : userBal.locked_bal});
 
-    // we have to mutate those positions as we move ahead as what we can do is
 
-    if (parseFloat(fillQty) >= existingQty) {
-      // then this postion is closed bro
-      Positions.delete(posKey);
 
-      // now we have to flip this position for that trader as follows
+  // now time for sate mutation here as for postions as 
+  if(incomingQty >= existingQty){
 
-      const leftOverQty = parseFloat(fillQty) - existingQty;
+    Positions.delete(posKey); // delete the current position 
 
-      if (leftOverQty > 0) {
-        const leftOverMargin =
-          (leftOverQty * parseFloat(fillPrice)) / parseFloat(leverage);
+    const leftOverQty = incomingQty - existingQty ;
+ 
+    if(leftOverQty > 0 ){
 
-        Positions.set(posKey, {
-          userId,
-          marketId,
-          baseToken,
-          side,
-          qty: fillQty,
-          entryPrice: fillPrice,
-          margin: leftOverMargin.toString(),
-          leverage: leverage,
-        });
-      }
-    } else {
-      // this block does when we have partial filled orders
+      const leftOverMargin = (leftOverQty * incomingPrice)/ incomingLeverage;
 
-      const remaningQty = existingQty - parseFloat(fillQty);
-      const remaingMargin = Math.max(0, existingMargin - marginReduction);
-
-      Positions.set(posKey, {
-        ...existingPosition,
-        qty: remaingQty.toString(),
-        margin: remaingMargin.toString(),
+      Positions.set(posKey , {
+        userId,marketId,baseToken,side,
+        qty: leftOverQty.toString(),
+        margin : leftOverMargin.toString(),
+        leverage,
+        entryPrice : fillPrice
       });
     }
+  }else{
+
+    // if the side is opposing but there are partial fills then what we can do is 
+
+    const remainingQty = existingQty - incomingQty ;
+
+    const remaingMargin = Math.max(0,existingMargin-marginReduction);
+
+    Positions.set(posKey,{
+      ...existingPosition,
+      qty : remainingQty.toString(),
+      margin : remaingMargin.toString()
+
+    });
   }
+
+  // // now to handel the opposing side as
+  // // as this is the term when side is not equal and the fills are higher than the required 
+  // // amount 
+  // if (parseFloat(fillQty) >= existingQty) {
+  //   // this is the term in which we close the postion for the user which was for the current side
+
+  //   // this is the excess qty that we have to open and oppsoing postion for 
+  //   filledQty = (existingQty - parseFloat(fillQty)).toString();
+  //   Positions.delete(posKey); 
+
+  // } else {
+  //   // if he is just squaring off the postion he himself made then he can absorb the sell right now
+  //   const remaingQty = existingQty - parseFloat(fillQty);
+
+  //   // calauate the new margin that this margin we have to adjust the new margin
+  //   const closedQty = Math.min(existingQty, parseFloat(fillQty));
+  //   // this is the amount of margin we have to reduce this much margin in the maker balance
+  //   const marginReduction = (closedQty / existingQty) * existingMargin;
+
+  //   // to check the realised pnl in the system what we can do is
+  //   const realisedPnl =
+  //     existingPosition.side === "LONG"
+  //       ? (parseFloat(fillPrice) - existingPrice) * closedQty
+  //       : (existingPrice - parseFloat(fillPrice)) * closedQty;
+
+  //   // now time to update the users balances
+
+  //   const userBal = Balances.get(existingPosition.userId) ?? {
+  //     available_bal: "0",
+  //     locked_bal: "0",
+  //   };
+
+  //   const currAvailBalance = parseFloat(userBal.available_bal);
+
+  //   const newAvailBalance = Math.max(
+  //     0,
+  //     currAvailBalance + marginReduction + realisedPnl,
+  //   );
+
+  //   // time yo update the balance for the user
+
+  //   Balances.set(existingPosition.userId, {
+  //     available_bal: newAvailBalance.toString(),
+  //     locked_bal: userBal.locked_bal,
+  //   });
+
+  //   // we have to mutate those positions as we move ahead as what we can do is
+
+  //   if (parseFloat(fillQty) >= existingQty) {
+  //     // then this postion is closed bro
+  //     Positions.delete(posKey);
+
+  //     // now we have to flip this position for that trader as follows
+
+  //     const leftOverQty = parseFloat(fillQty) - existingQty;
+
+  //     if (leftOverQty > 0) {
+  //       const leftOverMargin =
+  //         (leftOverQty * parseFloat(fillPrice)) / parseFloat(leverage);
+
+  //       Positions.set(posKey, {
+  //         userId,
+  //         marketId,
+  //         baseToken,
+  //         side,
+  //         qty: fillQty,
+  //         entryPrice: fillPrice,
+  //         margin: leftOverMargin.toString(),
+  //         leverage: leverage,
+  //       });
+  //     }
+  //   } else {
+  //     // this block does when we have partial filled orders
+
+  //     const remaningQty = existingQty - parseFloat(fillQty);
+  //     const remaingMargin = Math.max(0, existingMargin - marginReduction);
+
+  //     Positions.set(posKey, {
+  //       ...existingPosition,
+  //       qty: remaingQty.toString(),
+  //       margin: remaingMargin.toString(),
+  //     });
+  //   }
+  // }
 }
 
 // this is the function that is used for snapshot of the system
@@ -856,7 +920,8 @@ while (true) {
       if (fills.length > 0) {
         book.lastTradedPrice = parseFloat(fills[fills.length - 1]!.price);
 
-        // this determines what the taker and maker orders are here
+        // this determines what the taker and maker orders are here 
+
 
         const takerSide: "LONG" | "SHORT" = isBid ? "LONG" : "SHORT";
 
@@ -1317,7 +1382,13 @@ while (true) {
 
       let orderPrice: string | null = null;
 
-      let unfilledQty = "0"; 
+      let unfilledQty = "0";  
+
+      let sideP : "LONG" | "SHORT" = side == "BID" ? "LONG" : "SHORT";
+
+      let baseToken = book.baseToken;
+
+      
 
       if (side !== "BID" && side !== "ASK") {
         await publisher.xAdd("to-backend", "*", {
@@ -1349,8 +1420,7 @@ while (true) {
             orderPrice = priceKey;
 
             // this is the reamaing qty at the order that was found
-            const unExexcutedQty =
-              parseFloat(foundOrder.qty) - parseFloat(foundOrder.filledQty);
+            const unExexcutedQty = parseFloat(foundOrder.qty) - parseFloat(foundOrder.filledQty);
 
             // now we get the user balances for this type
 
@@ -1464,7 +1534,6 @@ while (true) {
         await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
         continue;
       }
-
       // notigy the db
 
       await publisher.xAdd("db-events", "*", {
