@@ -74,13 +74,37 @@ export type toEngine =  {
 
     } | {
 
-        messageType : "CHECK_LIQUIDATIONS" , 
+        messageType : "EXIT_POSITION" , 
 
         marketId : string , 
 
         markPrice : string , 
 
-    }
+        qty  : string ,
+
+        orderId : string ,
+
+        userId : string ,
+
+        side : orderSide
+
+    } | {
+
+        // i dont think this will be used that much ig 
+        messageType : "MODIFY_ORDER"
+
+        userId : string ,
+
+        marketId : string ,
+
+        orderId : string ,
+
+        reduceOnly : true ,
+
+        side : orderSide,
+
+
+    } 
 
 
     export interface EngineStreamEntry { 

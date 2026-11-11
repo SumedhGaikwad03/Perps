@@ -9,5 +9,8 @@ declare global {
     }
 }
 
-export {};  // this is basically deckarng merging in the typescript context in the reequest object 
+export {};  // this is basically deckarng merging in the typescript context in the 
+// reequest object  as we will attach the userid directly through the request 
+// so we can just do this as req.userId 
+
 

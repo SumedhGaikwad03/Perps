@@ -38,4 +38,30 @@ export function authmiddleware ( req : Request , res: Response , next :NextFunct
         }
 
 
-} 
+}
+
+export function adminMiddleWare(req : Request , res : Response , next : NextFunction){
+
+    const adminToken = req.headers.token as string ; 
+
+    try {
+
+        const decoded = jwt.verify(adminToken , process.env.ADMIN_SECRET!) as JwtPayload; 
+
+        if(decoded.userId){
+            
+            req.userId = decoded.userId; 
+          
+            next();
+        }
+        else {
+
+            return res.status(403).json({message : "TOken id  is invaild bro "});
+        }
+
+    }catch(e){
+
+        
+            return res.status(403).json({message : "TOken is invaild bro "});
+    }
+}

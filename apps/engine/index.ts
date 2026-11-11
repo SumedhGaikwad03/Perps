@@ -520,6 +520,14 @@ function updatePositionFills(
 
 // this is used for the ws connection for the same
 function startBinanceWebSocket() {
+
+  const RESET  = "\x1b[0m";
+  const BRIGHT = "\x1b[1m";
+  const GREEN  = "\x1b[32m";
+  const YELLOW = "\x1b[33m";
+  const CYAN   = "\x1b[36m";
+  const RED    = "\x1b[31m";
+  const MAGENTA = "\x1b[35m";
   // we retrive all the keys from the record we created
 
   const streams = Object.keys(BINANCE_FEED_MAP)
@@ -552,13 +560,19 @@ function startBinanceWebSocket() {
         return;
       }
 
-      const incomingToken = tick.s.toLowerCase();
+             console.log(`${CYAN}[TICK]${RESET} ${tick.s.padEnd(8)} | Price: ${BRIGHT}${tick.c}${RESET}`);
+      const incomingToken = tick.s.toLowerCase(); 
+
+      
 
       const baseToken = BINANCE_FEED_MAP[incomingToken];
 
       // in the markprices map we set the base token and the correspoinding price for the same
       if (baseToken) {
         markPrices.set(baseToken, tick.c);
+       
+          console.log(`  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`);
+          console.log(`---------------------------------------------------------------------------------------------------------------`);
       }
     } catch (err) {
       console.log(`There was a internal market error`, err);
@@ -644,7 +658,7 @@ while (true) {
 
     console.dir(response, { depth: null });
 
-    if (command.messageType == "CREATE_ORDER") {
+    if (command.messageType == "CREATE_ORDER"){
       // this end point could be an sell order or an buy order anything can happen here
       // destructuring the requied payload here
       const {
@@ -769,7 +783,7 @@ while (true) {
       }
 
       // as the user only requires margin when the is expanind the current position
-      // or creating a new position not closing the old one
+      // or creating a new position not closing the old one 
       const reqMargin = command.reduceOnly
         ? 0
         : (numQty * numPrice) / userLeverage;
@@ -1105,8 +1119,8 @@ while (true) {
         }
       }
 
-      // if the the fills happens at a better price than the price specifoed then
-      // we cross check here with the spends amount and the expected ,we check it here
+      // now we unlock the collateral for the taker as well because the filled amount is now part of the postion
+      // and if there was price improvment refund we send that back to available bal
       if (fills.length > 0 && !command.reduceOnly) {
         const totalActualSpend = fills.reduce(
           (sum, f) =>
@@ -1116,20 +1130,38 @@ while (true) {
 
         const expectedSpent = (exuctedQty * numPrice) / userLeverage;
 
-        const priceImprovementRefund = expectedSpent - totalActualSpend;
+        const priceImprovementRefund = Math.max(0, expectedSpent - totalActualSpend);
 
-        if (priceImprovementRefund > 0) {
-          const latestBalance = Balances.get(userId);
+        const latestBalance = Balances.get(userId) || {
+          available_bal: "0",
+          locked_bal: "0",
+        };
 
-          Balances.set(userId, {
-            available_bal: (
-              parseFloat(latestBalance!.available_bal) + priceImprovementRefund
-            ).toString(),
-            locked_bal: (
-              parseFloat(latestBalance!.locked_bal) - priceImprovementRefund
-            ).toString(),
-          });
-        }
+        // release the executed margin from locked bal since it now lives in postions
+        // and add the price improvment refund back to avail balance
+        const newLockedBal = Math.max(
+          0,
+          parseFloat(latestBalance.locked_bal) - totalActualSpend - priceImprovementRefund,
+        ).toString();
+
+        const newAvailBal = (
+          parseFloat(latestBalance.available_bal) + priceImprovementRefund
+        ).toString();
+
+        Balances.set(userId, {
+          available_bal: newAvailBal,
+          locked_bal: newLockedBal,
+        });
+
+        // sync the taker balance to postgress through db events
+        await publisher.xAdd("db-events", "*", {
+          eventType: "WALLET_UPDATE",
+          payload: JSON.stringify({
+            userId,
+            amountAvail: newAvailBal,
+            amountLocked: newLockedBal,
+          }),
+        });
       }
       // the full order is now completed its order
 
@@ -1347,7 +1379,7 @@ while (true) {
 
       // this is the db poller that updates the postgress
       await publisher.xAdd("db-events", "*", {
-        eventType: "WALLET_UPDATED",
+        eventType: "WALLET_UPDATE",
         payload: JSON.stringify({
           userId,
           amountAvail: newBalance,
@@ -1429,16 +1461,33 @@ while (true) {
               locked_bal: "0",
             };
 
-            // this is the margi tied to this order by the user
+            // this is the margi tied to this order by the user - we calauclate pro rated remaining margin
+            const remainingMargin = foundOrder.reduceOnly
+              ? 0
+              : (unExexcutedQty * parseFloat(priceKey)) / parseFloat(foundOrder.leverage || "1");
+
             const marginToUnlock = Math.min(
-              parseFloat(foundOrder.lockedMargin),
-              parseFloat(UserBalance?.locked_bal),
+              remainingMargin,
+              parseFloat(UserBalance?.locked_bal || "0"),
             );
 
-            Balances.set(userId,{
-              available_bal : (parseFloat(UserBalance.available_bal) + marginToUnlock).toString(),
-              locked_bal : (parseFloat(UserBalance.locked_bal)- marginToUnlock).toString(),
-                         });
+            const newAvailBal = (parseFloat(UserBalance.available_bal) + marginToUnlock).toString();
+            const newLockedBal = Math.max(0, parseFloat(UserBalance.locked_bal) - marginToUnlock).toString();
+
+            Balances.set(userId, {
+              available_bal: newAvailBal,
+              locked_bal: newLockedBal,
+            });
+
+            // update the postgress wallet balance via redis db events
+            await publisher.xAdd("db-events", "*", {
+              eventType: "WALLET_UPDATE",
+              payload: JSON.stringify({
+                userId,
+                amountAvail: newAvailBal,
+                amountLocked: newLockedBal,
+              }),
+            });
 
             // time to remove the order now
 
@@ -1488,19 +1537,32 @@ while (true) {
               locked_bal: "0",
             };
 
-            // this is the margi tied to this order by the user
+            // this is the margi tied to this order by the user - we calauclate pro rated remaining margin
+            const remainingMargin = foundOrder.reduceOnly
+              ? 0
+              : (unExexcutedQty * parseFloat(priceKey)) / parseFloat(foundOrder.leverage || "1");
+
             const marginToUnlock = Math.min(
-              parseFloat(foundOrder.lockedMargin),
-              parseFloat(UserBalance?.locked_bal),
+              remainingMargin,
+              parseFloat(UserBalance?.locked_bal || "0"),
             );
 
+            const newAvailBal = (parseFloat(UserBalance.available_bal) + marginToUnlock).toString();
+            const newLockedBal = Math.max(0, parseFloat(UserBalance.locked_bal) - marginToUnlock).toString();
+
             Balances.set(userId, {
-              available_bal: (
-                parseFloat(UserBalance.available_bal) + marginToUnlock
-              ).toString(),
-              locked_bal: (
-                parseFloat(UserBalance.locked_bal) - marginToUnlock
-              ).toString(),
+              available_bal: newAvailBal,
+              locked_bal: newLockedBal,
+            });
+
+            // update the postgress wallet balance via redis db events
+            await publisher.xAdd("db-events", "*", {
+              eventType: "WALLET_UPDATE",
+              payload: JSON.stringify({
+                userId,
+                amountAvail: newAvailBal,
+                amountLocked: newLockedBal,
+              }),
             });
 
             // time to remove the order now
@@ -1557,6 +1619,19 @@ while (true) {
           unfilledQty: unfilledQty,
         }),
         error: "",
+      });
+
+      await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
+      continue;
+    }
+
+    if (command.messageType == "EXIT_POSITION") {
+      // this is currently not supported directly here, user should place an opposing reduceOnly order
+      await publisher.xAdd("to-backend", "*", {
+        loopbackId,
+        status: "REJECTED",
+        data: "",
+        error: "EXIT_POSITION_NOT_SUPPORTED_USE_REDUCE_ONLY_ORDER",
       });
 
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
