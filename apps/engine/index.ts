@@ -2,6 +2,7 @@ import { createClient } from "redis";
 
 import type { orderSide, toEngine, DbEventMessage } from "common";
 import { main, postgres } from "bun";
+import { isLineBreak } from "typescript/unstable/ast";
 
 // we iniataire two instances that would read and publish the message for this stream
 const clientRead = createClient();
@@ -20,6 +21,7 @@ try {
   });
 } catch (error: any) {
   if (!error?.message?.includes("BUSYGROUP")) {
+    throw error;
   }
 }
 
@@ -94,8 +96,10 @@ const baseTokenToMarkets = new Map<string, string[]>([
 const DefaultMrr = 0.025;
 
 // the as const at the end makes this specifically as read only tokens
+// narrow its type form string to the exact tuple type
 export const SUPPORTED_BASE_TOKEN = ["BTC", "SOL", "ETH"] as const;
 
+// we index the tuples base on the number
 export type BaseToken = (typeof SUPPORTED_BASE_TOKEN)[number];
 
 console.log("engine has started");
@@ -168,7 +172,7 @@ async function sweepLiquadations() {
           marketId: pos.marketId,
           equity: equity,
           mrr: maintainenceMargin,
-          markPrice: markPrices.get(marketId),
+          markPrice: markPrices.get(book.baseToken),
         }),
       });
     }
@@ -193,6 +197,15 @@ async function fundingRate() {
     if (!rawPrice) continue;
 
     const markPrice = parseFloat(rawPrice);
+
+    if (
+      !Number.isFinite(perpPrice) ||
+      perpPrice <= 0 ||
+      !Number.isFinite(markPrice) ||
+      markPrice <= 0
+    ) {
+      continue;
+    }
 
     let premiumRate = markPrice > 0 ? (perpPrice - markPrice) / markPrice : 0;
 
@@ -290,16 +303,23 @@ async function fundingRate() {
         available_bal: currentAvail.toString(),
         locked_bal: userBal.locked_bal,
       });
+
+      // time to persisit this data to the db
+      await publisher.xAdd("db-events", "*", {
+        eventType: "WALLET_UPDATE",
+        payload: JSON.stringify({
+          userId: pos.userId,
+          amountAvail: currentAvail.toString(),
+          locked_bal: userBal.locked_bal,
+        }),
+      });
     }
   }
 }
 
 // this is used for normalsising the binace incoming tokens
-function RegisterBinanceFeed(
-  binanceIncoming: string,
-  internalMarketId: string,
-) {
-  BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = internalMarketId;
+function RegisterBinanceFeed(binanceIncoming: string, baseToken: BaseToken) {
+  BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = baseToken;
 }
 
 // this function is used for update the position for the order
@@ -315,20 +335,29 @@ function updatePositionFills(
   // here we find the user and the market id for positions in that market here
   const posKey = `${userId}:${marketId}`;
 
-  const existingPosition = Positions.get(posKey); 
+  const existingPosition = Positions.get(posKey);
 
   let incomingQty = parseFloat(fillQty);
   let incomingPrice = parseFloat(fillPrice);
-  let incomingLeverage = parseFloat(leverage); 
+  let incomingLeverage = parseFloat(leverage);
 
+  if (
+    incomingQty <= 0 ||
+    !Number.isFinite(incomingQty) ||
+    !Number.isFinite(incomingPrice) ||
+    !Number.isFinite(incomingLeverage) ||
+    incomingLeverage <= 0
+  ) {
+    throw new Error("QTY_IS_INAVILD_BRO");
+  }
 
   // if that user does not have an position open in that market then
 
   // this is a brand new posotion that we have opened for the user
   if (!existingPosition || parseFloat(existingPosition.qty) === 0) {
     const margin = (
-      (parseFloat(fillQty) * parseFloat(fillPrice)) /
-      parseFloat(leverage)
+      (incomingQty * incomingPrice) /
+      incomingLeverage
     ).toString();
 
     Positions.set(posKey, {
@@ -350,18 +379,18 @@ function updatePositionFills(
   const existingPrice = parseFloat(existingPosition.entryPrice);
   const existingMargin = parseFloat(existingPosition.margin);
 
-
   // now we either add into the postion or dleverage the postion
 
   if (existingPosition.side === side) {
     // we double down on the existing postion as we make this we incerse the stakes in the project
-    const newQty = existingQty + parseFloat(fillQty);
-    const avgEntryPrice =(existingQty * existingPrice + parseFloat(fillQty) * parseFloat(fillPrice)) /newQty;
-    const addedMargin =(parseFloat(fillQty) * parseFloat(fillPrice)) / parseFloat(leverage);
-    const totalNewMargin = existingMargin + addedMargin ;
-    const totalNotianoalValue = newQty * avgEntryPrice ;
+    const newQty = existingQty + incomingQty;
+    const avgEntryPrice =
+      (existingQty * existingPrice + incomingQty * incomingPrice) / newQty;
+    const addedMargin = (incomingQty * incomingPrice) / incomingLeverage;
+    const totalNewMargin = existingMargin + addedMargin;
+    const totalNotianoalValue = newQty * avgEntryPrice;
 
-    const blendedLeverage =  totalNotianoalValue/totalNewMargin;
+    const blendedLeverage = totalNotianoalValue / totalNewMargin;
 
     // now its time to set new postions here as
 
@@ -370,75 +399,86 @@ function updatePositionFills(
       qty: newQty.toString(),
       entryPrice: avgEntryPrice.toString(),
       margin: (existingMargin + addedMargin).toString(),
-      leverage : blendedLeverage.toFixed(2).toString()
+      leverage: blendedLeverage.toFixed(2).toString(),
     });
     return;
   }
 
+  // now the flat pipeline for handing the opposing side of orders
 
-  // now the flat pipeline for handing the opposing side of orders 
+  const closedQty = Math.min(existingQty, incomingQty);
 
-  const closedQty = Math.min(existingQty,incomingQty);
+  const marginReduction = (closedQty / existingQty) * existingMargin;
 
-  const marginReduction = (closedQty/existingQty)*existingMargin ;
+  const realisedPnl =
+    existingPosition.side === "LONG"
+      ? (incomingPrice - existingPrice) * closedQty
+      : (existingPrice - incomingPrice) * closedQty;
 
+  const userBal = Balances.get(userId) || {
+    available_bal: "0",
+    locked_bal: "0",
+  };
 
-  const realisedPnl =existingPosition.side === "LONG" ? (incomingPrice - existingPrice)*closedQty 
-  :(existingPrice - incomingPrice)*closedQty; 
+  const newBalance = Math.max(
+    0,
+    parseFloat(userBal.available_bal) + marginReduction + realisedPnl,
+  );
 
+  Balances.set(userId, {
+    available_bal: newBalance.toString(),
+    locked_bal: userBal.locked_bal,
+  });
 
-  const userBal = Balances.get(userId) || {available_bal : "0" , locked_bal : "0"};
+  // now time for sate mutation here as for postions as
+  if (incomingQty >= existingQty) {
+    Positions.delete(posKey); // delete the current position
 
-  const newBalance = Math.max(0,parseFloat(userBal.available_bal)+marginReduction+realisedPnl);
+    const leftOverQty = incomingQty - existingQty;
 
-  Balances.set(userId , {available_bal : newBalance.toString() , locked_bal : userBal.locked_bal});
+    if (leftOverQty > 0) {
+      const leftOverMargin = (leftOverQty * incomingPrice) / incomingLeverage;
 
-
-
-  // now time for sate mutation here as for postions as 
-  if(incomingQty >= existingQty){
-
-    Positions.delete(posKey); // delete the current position 
-
-    const leftOverQty = incomingQty - existingQty ;
- 
-    if(leftOverQty > 0 ){
-
-      const leftOverMargin = (leftOverQty * incomingPrice)/ incomingLeverage;
-
-      Positions.set(posKey , {
-        userId,marketId,baseToken,side,
+      Positions.set(posKey, {
+        userId,
+        marketId,
+        baseToken,
+        side,
         qty: leftOverQty.toString(),
-        margin : leftOverMargin.toString(),
+        margin: leftOverMargin.toString(),
         leverage,
-        entryPrice : fillPrice
+        entryPrice: fillPrice,
       });
     }
-  }else{
+  } else {
+    // if the side is opposing but there are partial fills then what we can do is
 
-    // if the side is opposing but there are partial fills then what we can do is 
+    const remainingQty = existingQty - incomingQty;
 
-    const remainingQty = existingQty - incomingQty ;
+    const remaingMargin = Math.max(0, existingMargin - marginReduction);
 
-    const remaingMargin = Math.max(0,existingMargin-marginReduction);
+    const remainigNotionalValue = remainingQty * existingPrice;
 
-    Positions.set(posKey,{
+    const currentLeverage =
+      remaingMargin > 0 ? remainigNotionalValue / remaingMargin : 0;
+
+    Positions.set(posKey, {
       ...existingPosition,
-      qty : remainingQty.toString(),
-      margin : remaingMargin.toString()
-
+      qty: remainingQty.toString(),
+      margin: remaingMargin.toString(),
+      leverage: currentLeverage.toString(),
     });
   }
 
   // // now to handel the opposing side as
-  // // as this is the term when side is not equal and the fills are higher than the required 
-  // // amount 
+  // // as this is the term when side is not equal and the fills are higher than the required
+  // // amount
   // if (parseFloat(fillQty) >= existingQty) {
   //   // this is the term in which we close the postion for the user which was for the current side
 
-  //   // this is the excess qty that we have to open and oppsoing postion for 
+  //   // this is the excess qty that we have to open and oppsoing postion for
   //   filledQty = (existingQty - parseFloat(fillQty)).toString();
-  //   Positions.delete(posKey); 
+  //   Positions.delete(posKey);
 
   // } else {
   //   // if he is just squaring off the postion he himself made then he can absorb the sell right now
@@ -520,13 +560,12 @@ function updatePositionFills(
 
 // this is used for the ws connection for the same
 function startBinanceWebSocket() {
-
-  const RESET  = "\x1b[0m";
+  const RESET = "\x1b[0m";
   const BRIGHT = "\x1b[1m";
-  const GREEN  = "\x1b[32m";
-  const YELLOW = "\x1b[33m";
-  const CYAN   = "\x1b[36m";
-  const RED    = "\x1b[31m";
+  const GREEN = "\x1b[32m";
+  //const YELLOW = "\x1b[33m";
+  const CYAN = "\x1b[36m";
+  //const RED    = "\x1b[31m";
   const MAGENTA = "\x1b[35m";
   // we retrive all the keys from the record we created
 
@@ -560,19 +599,23 @@ function startBinanceWebSocket() {
         return;
       }
 
-             console.log(`${CYAN}[TICK]${RESET} ${tick.s.padEnd(8)} | Price: ${BRIGHT}${tick.c}${RESET}`);
-      const incomingToken = tick.s.toLowerCase(); 
-
-      
+      console.log(
+        `${CYAN}[TICK]${RESET} ${tick.s.padEnd(8)} | Price: ${BRIGHT}${tick.c}${RESET}`,
+      );
+      const incomingToken = tick.s.toLowerCase();
 
       const baseToken = BINANCE_FEED_MAP[incomingToken];
 
       // in the markprices map we set the base token and the correspoinding price for the same
       if (baseToken) {
         markPrices.set(baseToken, tick.c);
-       
-          console.log(`  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`);
-          console.log(`---------------------------------------------------------------------------------------------------------------`);
+
+        console.log(
+          `  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`,
+        );
+        console.log(
+          `---------------------------------------------------------------------------------------------------------------`,
+        );
       }
     } catch (err) {
       console.log(`There was a internal market error`, err);
@@ -614,6 +657,486 @@ startLiquidationPoller();
 startBinanceWebSocket();
 
 console.log("all the backgrouund daemons are now working here ");
+
+async function executeMatchingFunction(
+  command: Extract<toEngine, { messageType: "CREATE_ORDER" }>,
+  loopbackId: string,
+  streamEntryId: string,
+) {
+  // THE EXTRACT KEY WORD is used to narrow down the union types in the in the commons
+
+  // now lets start to implemtn the logic in this function
+  const { userId, marketId, side, qty, price, orderType, leverage, orderId } =
+    command;
+
+  // time to destruture the counts here
+
+  const numQty = parseFloat(qty);
+
+  const book = orderBook.get(marketId);
+
+  const userLeverage = parseFloat(leverage);
+
+  if (!book) {
+    return "book not found broo";
+  }
+
+  const numPrice = price ? parseFloat(price) : book.lastTradedPrice;
+
+  // the logic for matching order is as follows
+
+  let remaningQty = numQty;
+
+  // this is an fills array that will execute once in the lifecycle as how many orders can it eat in the orderbook
+  // we define this array as for the the current fills that are happeining
+  const fills: Array<{
+    price: string;
+
+    qty: string;
+    //maker is the one who we swap with as he is the one that makes the fills possible
+    makerOrderId: string;
+
+    makerUserId: string;
+
+    makerUserLeverage: string;
+
+    makerMarginToRealase: string;
+  }> = [];
+
+  // we extract the type of order and then also find the matching sode that we would swap our order with
+  const isBid = side === "BID";
+
+  const opposingBook = isBid ? book.asks : book.bids;
+
+  const sortedPrices = Array.from(opposingBook.keys()).sort((a, b) => {
+    // if our bid is true we sort the prices in ascending as ask are sorted ascending and bids are sorts decending
+
+    return isBid
+      ? parseFloat(a) - parseFloat(b)
+      : parseFloat(b) - parseFloat(a);
+  });
+
+  // we check the orderType as fok is possible or not here
+
+  if (command.timeInForce === "FOK") {
+    let available_qty = 0;
+
+    for (const priceKey of sortedPrices) {
+      // current level price
+      const levelprice = Number(priceKey);
+
+      if (orderType === "LIMIT") {
+        if (isBid && levelprice > numPrice) break;
+        if (!isBid && levelprice < numPrice) break;
+      }
+      // lets start with extracting the first level as
+
+      const level = opposingBook.get(priceKey);
+
+      if (!level) {
+        continue;
+      }
+
+      available_qty += Number(level.totalQty);
+
+      if (available_qty >= numQty) {
+        break;
+      }
+    }
+
+    // even at this point the availble qty is not enough to make the order
+    // worth it
+    if (available_qty < numQty) {
+      // TO MAKE THE TAKER GET BACK HIS COLLATERAL AS
+
+      const bal = Balances.get(userId);
+
+      const marginToUnlock =
+        (parseFloat(qty) * parseFloat(price!)) / parseFloat(leverage);
+
+      Balances.set(userId, {
+        available_bal: bal?.available_bal!,
+        locked_bal: bal?.locked_bal! + marginToUnlock,
+      });
+
+      await publisher.xAdd("db-events", "*", {
+        loopbackId,
+        status: "REJECTED",
+        data: "",
+        error: "THE_FOK_ORDER_IS_NOT_POSSIBLE_BRO_NOT_ENOUGH_QTY",
+      });
+    }
+  }
+
+  // now we have to check for ioc 
+
+  for (const priceKey of sortedPrices) {
+    // THIS LOOP WILL KEEP ON FILLING ORDER UNITL THE REMANING QTY IS ZERO OR THREE ARE NO SUTABLE ORDERS TO SWAP AGAINST
+
+    if (remaningQty <= 0) {
+      break;
+    }
+
+    const levelPrice = parseFloat(priceKey); // WE HAVE THE CURRENT BEST PRICE
+    // the prices were already sorted so this made sense
+
+    if (orderType === "LIMIT") {
+      // at limit orders the best price for each table is defined as as we cant find a better price then we break it off
+
+      if (isBid && levelPrice > numPrice) break; // ask price is greater than num price that is given to the system by user
+      if (!isBid && levelPrice < numPrice) break; // bid price is greater
+    }
+
+    // is all is set for limit or simply the order is for market then
+    //pull the the entrie order list  for this price key
+    const priceLevel = opposingBook.get(priceKey);
+
+    // time to fill the order one at a time like this
+
+    while (priceLevel?.orders.length! > 0 && remaningQty > 0) {
+      // have to walk the order book to satifiy the orders we have injested
+
+      // we extract the first order form the book
+
+      const restingOrder = priceLevel?.orders[0];
+
+      const restingOrderRemaning =
+        parseFloat(restingOrder?.qty!) - parseFloat(restingOrder?.filledQty!);
+
+      // The quantity that is matched with the order is here
+      const matchQty = Math.min(remaningQty, restingOrderRemaning);
+
+      const makerReamainingMargin = parseFloat(restingOrder!.lockedMargin);
+
+      const makerMarginToRelease =
+        restingOrderRemaning > 0
+          ? Math.min(
+              makerReamainingMargin,
+              (matchQty / restingOrderRemaning) * makerReamainingMargin,
+            )
+          : 0;
+
+      // we push the orders that are filed into quantity so right now the inmemory array has all the executed orders in the book
+      fills.push({
+        price: priceKey,
+        qty: matchQty.toString(),
+        makerOrderId: restingOrder?.originalOrderId!,
+        makerUserId: restingOrder?.userId!,
+        makerUserLeverage: restingOrder?.leverage! || "1",
+        makerMarginToRealase: makerMarginToRelease.toString(),
+      });
+
+      // this is the updation in the resting order that we just filled
+      restingOrder!.filledQty = (
+        parseFloat(restingOrder!.filledQty) + matchQty
+      ).toString();
+
+      // reducing the margin for the margin is as follows as
+
+      restingOrder!.lockedMargin = Math.max(
+        0,
+        makerReamainingMargin - makerMarginToRelease,
+      ).toString();
+
+      // this is the updation in the user remaing qty of the originalr order
+      remaningQty -= matchQty;
+
+      // now the reduce  the volume at the sitting order here
+      priceLevel!.totalQty = (
+        parseFloat(priceLevel?.totalQty!) - matchQty
+      ).toString();
+
+      // if the entire order is filled then we have to dequee that order
+
+      if (
+        parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty)
+      ) {
+        // this removes the order at index 0 and slides every other order by one position
+        priceLevel?.orders.shift();
+      }
+
+      // if all the oders at the order book are eaten then we delete that price level
+      // a price level is how much order sit at the price level is (price : (total Qty & orders[])) ;
+      if (priceLevel?.orders.length == 0) {
+        opposingBook.delete(priceKey);
+      }
+    }
+  }
+  // update the last traded price with the most recent fills (temp array for this cycle ) in the table
+
+  if (fills.length > 0) {
+    book.lastTradedPrice = parseFloat(fills[fills.length - 1]!.price);
+
+    // this determines what the taker and maker orders are here
+
+    const takerSide: "LONG" | "SHORT" = isBid ? "LONG" : "SHORT";
+
+    const makerSide: "LONG" | "SHORT" = isBid ? "SHORT" : "LONG";
+
+    // this is time to inalise an set for the affected users as this will hold the postions
+    // that we have to snapshot in the db via the redis queue called the db-events
+
+    const affectedUsers = new Set<string>();
+
+    // now we have to update the postions for each of the trader as
+    for (const fill of fills) {
+      // as we have to proccess each fill and update the postion for each of the party (maker/taker)
+
+      const fillQty = parseFloat(fill.qty);
+      const fillPrice = parseFloat(fill.price);
+      const makerLeverage = parseFloat(fill.makerUserLeverage);
+      // now we have extracted the makerLeverage form the fills
+
+      // tem to release the makerLocked balance
+      const makerBal = Balances.get(fill.makerUserId);
+
+      const makerMarginToRealase = parseFloat(fill.makerMarginToRealase);
+
+      if (makerBal && makerMarginToRealase > 0) {
+        //const lockedBalance = parseFloat(makerBal.locked_bal);
+
+        //const collateralToUnlock = (fillQty * fillPrice) / makerLeverage;
+        // either the entire balce gets liquadated or the maker has zero locked bal it cant go naegative
+        // so we fall back to zero
+        const updatedLockedBalance = Math.max(
+          0,
+          parseFloat(makerBal.locked_bal) - makerMarginToRealase,
+        );
+
+        // we also have to set the makers balances now in the memory now that is done now
+        Balances.set(fill.makerUserId, {
+          available_bal: makerBal.available_bal,
+          locked_bal: updatedLockedBalance.toString(),
+        });
+
+        await publisher.xAdd("db-events", "*", {
+          eventType: "WALLET_UPDATE",
+          payload: JSON.stringify({
+            userId: fill.makerUserId,
+            amountAvail: makerBal.available_bal,
+            amountLocked: updatedLockedBalance,
+          }),
+        });
+      }
+
+      //
+
+      // this is for the taker id
+      updatePositionFills(
+        userId,
+        marketId,
+        book.baseToken,
+        takerSide,
+        fill.qty,
+        fill.price,
+        userLeverage.toString(),
+      );
+
+      // this is for the maker id
+
+      updatePositionFills(
+        fill.makerUserId,
+        marketId,
+        book.baseToken,
+        makerSide,
+        fill.qty,
+        fill.price,
+        makerLeverage.toString(),
+      );
+
+      // now to record the taker and the maker id for db updation of postion
+      // as its a set all the dublicated values are already handled
+
+      affectedUsers.add(userId);
+      affectedUsers.add(fill.makerUserId);
+    }
+
+    // now the loop to update the postion as
+
+    for (const affectedUserId of affectedUsers) {
+      const posKey = `${affectedUserId}:${marketId}`;
+
+      const currentPosition = Positions.get(posKey);
+
+      // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means
+      // the postionn was deleted by the in memory array so we just update the size of the postion to be zero
+      const payload = currentPosition
+        ? {
+            userId: affectedUserId,
+            marketId,
+            size:
+              currentPosition.side === "LONG"
+                ? currentPosition?.qty
+                : `-${currentPosition?.qty}`,
+            entryPrice: currentPosition?.entryPrice,
+            leverage: Number(currentPosition?.leverage),
+            liquidationPrice: null,
+          }
+        : {
+            userId: affectedUserId,
+            marketId,
+            size: "0",
+            leverage: "0",
+            liquidationPrice: null,
+          };
+
+      await publisher.xAdd("db-events", "*", {
+        eventType: "POSITION_UPDATED",
+        payload: JSON.stringify(payload),
+      });
+    }
+  }
+  // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over
+
+  let finalStatus: "FILLED" | "PARTIALLY_FILLED" | "OPEN" | "CANCELLED";
+
+  finalStatus = "OPEN";
+
+  const exuctedQty = numQty - remaningQty; // this is the amount that is still left to be executed
+
+
+  if(remaningQty <= 0 ){
+
+    finalStatus = "FILLED";
+    //return ;
+  }else {
+    //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
+    if (orderType === "LIMIT" && command.timeInForce === "GTC") {
+      finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
+
+      // all the unfinished limit order must sit on the same side of the order book for all
+      const targetSide = isBid ? book.bids : book.asks;
+
+      // this is the price that the order was places upon
+      const restingPrice = price!;
+
+      // get all the orders at the that level & we add volume to that level
+      let level = targetSide.get(restingPrice);
+
+      if (!level) {
+        // if current price level does not exist then we create our own price
+        // this is the
+        level = {
+          totalQty: "0",
+          orders: [],
+        };
+
+        targetSide.set(restingPrice, level);
+      }
+      // if the that
+
+      //pushing our order to the level that was needed
+      const restingMarginLocked = command.reduceOnly
+        ? "0"
+        : ((remaningQty * numPrice) / userLeverage).toString();
+      // currently the order sits on the orderbook so we have to push that order to the in memory array of open positions
+      //
+      level.orders.push({
+        userId,
+        originalOrderId: orderId,
+        qty: numQty.toString(),
+        filledQty: exuctedQty.toString(),
+        leverage: userLeverage.toString(),
+        lockedMargin: restingMarginLocked,
+        reduceOnly: Boolean(command.reduceOnly),
+      });
+
+      //updating the depth of the order for that level
+      level.totalQty = (parseFloat(level.totalQty) + remaningQty).toString();
+    } else {
+
+      // THIS IS WHEN THE  limit ioc is here 
+      finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "CANCELLED";
+
+      // calculate collateral locked for unfullfiled portain
+      // there is no point in holding the unused margin in this
+
+      const unusedMargin = command.reduceOnly
+        ? 0
+        : (remaningQty * numPrice) / userLeverage;
+
+      if (unusedMargin > 0) {
+        const latestBalance = Balances.get(userId);
+
+        Balances.set(userId, {
+          available_bal: (
+            parseFloat(latestBalance!.available_bal) + unusedMargin
+          ).toString(),
+          locked_bal: (
+            parseFloat(latestBalance!.locked_bal) - unusedMargin
+          ).toString(),
+        });
+      }
+    }
+  }
+
+  // now we unlock the collateral for the taker as well because the filled amount is now part of the postion
+  // and if there was price improvment refund we send that back to available bal
+  if (fills.length > 0 && !command.reduceOnly) {
+    const totalActualSpend = fills.reduce(
+      (sum, f) =>
+        sum + (parseFloat(f.qty) * parseFloat(f.price)) / userLeverage,
+      0,
+    );
+
+    // the num price is not nessaryly the corret methos its a rough estimation of the spends this num price is
+    // the last traded price in the system
+    const expectedSpent = (exuctedQty * numPrice) / userLeverage;
+
+    const priceImprovementRefund = Math.max(
+      0,
+      expectedSpent - totalActualSpend,
+    );
+
+    const latestBalance = Balances.get(userId) || {
+      available_bal: "0",
+      locked_bal: "0",
+    };
+
+    // release the executed margin from locked bal since it now lives in postions
+    // and add the price improvment refund back to avail balance
+    const newLockedBal = Math.max(
+      0,
+      parseFloat(latestBalance.locked_bal) -
+        totalActualSpend -
+        priceImprovementRefund,
+    ).toString();
+
+    const newAvailBal = (
+      parseFloat(latestBalance.available_bal) + priceImprovementRefund
+    ).toString();
+
+    Balances.set(userId, {
+      available_bal: newAvailBal,
+      locked_bal: newLockedBal,
+    });
+
+    // sync the taker balance to postgress through db events
+    await publisher.xAdd("db-events", "*", {
+      eventType: "WALLET_UPDATE",
+      payload: JSON.stringify({
+        userId,
+        amountAvail: newAvailBal,
+        amountLocked: newLockedBal,
+      }),
+    });
+  }
+  // the full order is now completed its order
+
+  await publisher.xAdd("to-backend", "*", {
+    loopbackId,
+    status: "SUCCESS",
+    data: JSON.stringify({
+      orderId,
+      marketId,
+      status: finalStatus,
+      exuctedQty: exuctedQty.toString(),
+      remaningQty: remaningQty.toString(),
+      fills,
+    }),
+    error: " ", // keeping it at top level so its easy to exectue at the top level 
+  });
+}
 
 while (true) {
   try {
@@ -658,7 +1181,7 @@ while (true) {
 
     console.dir(response, { depth: null });
 
-    if (command.messageType == "CREATE_ORDER"){
+    if (command.messageType == "CREATE_ORDER") {
       // this end point could be an sell order or an buy order anything can happen here
       // destructuring the requied payload here
       const {
@@ -699,7 +1222,11 @@ while (true) {
       const numPrice = price ? parseFloat(price) : book.lastTradedPrice;
 
       // checks if the user has given a vaild price and quantity
-      if (numQty <= 0 || (orderType === "LIMIT" && (!price || numPrice <= 0))) {
+      if (
+        !Number.isFinite(numQty) ||
+        numQty <= 0 ||
+        (orderType === "LIMIT" && (!price || numPrice <= 0))
+      ) {
         await publisher.xAdd("to-backend", "*", {
           loopbackId,
           status: "REJECTED",
@@ -711,10 +1238,33 @@ while (true) {
         continue;
       }
 
+      if (
+        (orderType !== "LIMIT" && orderType !== "MARKET") ||
+        (side !== "BID" && side !== "ASK")
+      ) {
+        await publisher.xAdd("to-backend", "*", {
+          loopbackId,
+          status: "REJECTED",
+          data: " ",
+          error: "ORDER_TYPE_OR_SIDE_INAVILD_BROO",
+        });
+
+        await clientRead.xAdd(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue;
+      }
+
       const userLeverage = command.leverage ? parseFloat(leverage) : 1;
 
       if (userLeverage <= 0 || !Number.isFinite(userLeverage)) {
-        throw new Error("Invaild Leverage");
+        await publisher.xAdd("to-backend ", "*", {
+          loopbackId,
+          status: "REJECTED",
+          error: " ",
+          data: "INVAILD_LEVERAGE_BRO",
+        });
+
+        await clientRead.xAdd(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue;
       }
 
       // check if the user needs extra margin to open an trade as is he squaring down on the current postion or opening a new posistion
@@ -765,6 +1315,7 @@ while (true) {
             data: "",
             error: "OPEN_POSITION_MUST_BE_OPPOSING_THE_CURRENT_POS",
           });
+          await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
           continue;
         }
 
@@ -778,12 +1329,13 @@ while (true) {
             data: "",
             error: "THE_REQUIRED_POSITION_AMOUNT_IS_NOT_ENOUGH",
           });
+          await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
           continue;
         }
       }
 
       // as the user only requires margin when the is expanind the current position
-      // or creating a new position not closing the old one 
+      // or creating a new position not closing the old one
       const reqMargin = command.reduceOnly
         ? 0
         : (numQty * numPrice) / userLeverage;
@@ -822,408 +1374,409 @@ while (true) {
         locked_bal: (parseFloat(userBalance.locked_bal) + reqMargin).toString(),
       });
 
+      // the balances are lockend now
+
       // now the balacnece has been locked for the user , we now have to make the matching engine / work the matching engine
 
       // this is the quantity that is still left to be filled
-      let remaningQty = numQty;
+      // let remaningQty = numQty;
 
-      // this is an fills array that will execute once in the lifecycle as how many orders can it eat in the orderbook
-      // we define this array as for the the current fills that are happeining
-      const fills: Array<{
-        price: string;
+      // // this is an fills array that will execute once in the lifecycle as how many orders can it eat in the orderbook
+      // // we define this array as for the the current fills that are happeining
+      // const fills: Array<{
+      //   price: string;
 
-        qty: string;
-        //maker is the one who we swap with as he is the one that makes the fills possible
-        makerOrderId: string;
+      //   qty: string;
+      //   //maker is the one who we swap with as he is the one that makes the fills possible
+      //   makerOrderId: string;
 
-        makerUserId: string;
+      //   makerUserId: string;
 
-        makerUserLeverage: string;
-      }> = [];
+      //   makerUserLeverage: string;
+      // }> = [];
 
-      // we extract the type of order and then also find the matching sode that we would swap our order with
-      const isBid = side === "BID";
+      // // we extract the type of order and then also find the matching sode that we would swap our order with
+      // const isBid = side === "BID";
 
-      const opposingBook = isBid ? book.asks : book.bids;
+      // const opposingBook = isBid ? book.asks : book.bids;
 
-      const sortedPrices = Array.from(opposingBook.keys()).sort((a, b) => {
-        // if our bid is true we sort the prices in ascending as ask are sorted ascending and bids are sorts decending
+      // const sortedPrices = Array.from(opposingBook.keys()).sort((a, b) => {
+      //   // if our bid is true we sort the prices in ascending as ask are sorted ascending and bids are sorts decending
 
-        return isBid
-          ? parseFloat(a) - parseFloat(b)
-          : parseFloat(b) - parseFloat(a);
-      });
+      //   return isBid
+      //     ? parseFloat(a) - parseFloat(b)
+      //     : parseFloat(b) - parseFloat(a);
+      // });
 
-      for (const priceKey of sortedPrices) {
-        // THIS LOOP WILL KEEP ON FILLING ORDER UNITL THE REMANING QTY IS ZERO OR THREE ARE NO SUTABLE ORDERS TO SWAP AGAINST
+      // for (const priceKey of sortedPrices) {
+      //   // THIS LOOP WILL KEEP ON FILLING ORDER UNITL THE REMANING QTY IS ZERO OR THREE ARE NO SUTABLE ORDERS TO SWAP AGAINST
 
-        if (remaningQty <= 0) {
-          break;
-        }
+      //   if (remaningQty <= 0) {
+      //     break;
+      //   }
 
-        const levelPrice = parseFloat(priceKey); // WE HAVE THE CURRENT BEST PRICE
-        // the prices were already sorted so this made sense
+      //   const levelPrice = parseFloat(priceKey); // WE HAVE THE CURRENT BEST PRICE
+      //   // the prices were already sorted so this made sense
 
-        if (orderType === "LIMIT") {
-          // at limit orders the best price for each table is defined as as we cant find a better price then we break it off
+      //   if (orderType === "LIMIT") {
+      //     // at limit orders the best price for each table is defined as as we cant find a better price then we break it off
 
-          if (isBid && levelPrice > numPrice) break; // ask price is greater than num price that is given to the system by user
-          if (!isBid && levelPrice < numPrice) break; // bid price is greater
-        }
+      //     if (isBid && levelPrice > numPrice) break; // ask price is greater than num price that is given to the system by user
+      //     if (!isBid && levelPrice < numPrice) break; // bid price is greater
+      //   }
 
-        // is all is set for limit or simply the order is for market then
-        //pull the the entrie order list  for this price key
-        const priceLevel = opposingBook.get(priceKey);
+      //   // is all is set for limit or simply the order is for market then
+      //   //pull the the entrie order list  for this price key
+      //   const priceLevel = opposingBook.get(priceKey);
 
-        // time to fill the order one at a time like this
+      //   // time to fill the order one at a time like this
 
-        while (priceLevel?.orders.length! > 0 && remaningQty > 0) {
-          // have to walk the order book to satifiy the orders we have injested
+      //   while (priceLevel?.orders.length! > 0 && remaningQty > 0) {
+      //     // have to walk the order book to satifiy the orders we have injested
 
-          // we extract the first order form the book
+      //     // we extract the first order form the book
 
-          const restingOrder = priceLevel?.orders[0];
+      //     const restingOrder = priceLevel?.orders[0];
 
-          const restingOrderRemaning =
-            parseFloat(restingOrder?.qty!) -
-            parseFloat(restingOrder?.filledQty!);
+      //     const restingOrderRemaning =
+      //       parseFloat(restingOrder?.qty!) -
+      //       parseFloat(restingOrder?.filledQty!);
 
-          // The quantity that is matched with the order is here
-          const matchQty = Math.min(remaningQty, restingOrderRemaning);
+      //     // The quantity that is matched with the order is here
+      //     const matchQty = Math.min(remaningQty, restingOrderRemaning);
 
-          // we push the orders that are filed into quantity so right now the inmemory array has all the executed orders in the book
-          fills.push({
-            price: priceKey,
-            qty: matchQty.toString(),
-            makerOrderId: restingOrder?.originalOrderId!,
-            makerUserId: restingOrder?.userId!,
-            makerUserLeverage: restingOrder?.leverage! || "1",
-          });
-
-          // this is the updation in the resting order that we just filled
-          restingOrder!.filledQty = (
-            parseFloat(restingOrder!.filledQty) + matchQty
-          ).toString();
+      //     // we push the orders that are filed into quantity so right now the inmemory array has all the executed orders in the book
+      //     fills.push({
+      //       price: priceKey,
+      //       qty: matchQty.toString(),
+      //       makerOrderId: restingOrder?.originalOrderId!,
+      //       makerUserId: restingOrder?.userId!,
+      //       makerUserLeverage: restingOrder?.leverage! || "1",
+      //     });
+
+      //     // this is the updation in the resting order that we just filled
+      //     restingOrder!.filledQty = (
+      //       parseFloat(restingOrder!.filledQty) + matchQty
+      //     ).toString();
+
+      //     // this is the updation in the user remaing qty of the originalr order
+      //     remaningQty -= matchQty;
+
+      //     // now the reduce  the volume at the sitting order here
+      //     priceLevel!.totalQty = (
+      //       parseFloat(priceLevel?.totalQty!) - matchQty
+      //     ).toString();
 
-          // this is the updation in the user remaing qty of the originalr order
-          remaningQty -= matchQty;
+      //     // if the entire order is filled then we have to dequee that order
 
-          // now the reduce  the volume at the sitting order here
-          priceLevel!.totalQty = (
-            parseFloat(priceLevel?.totalQty!) - matchQty
-          ).toString();
-
-          // if the entire order is filled then we have to dequee that order
-
-          if (
-            parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty)
-          ) {
-            // this removes the order at index 0 and slides every other order by one position
-            priceLevel?.orders.shift();
-          }
-
-          // if all the oders at the order book are eaten then we delete that price level
-          // a price level is how much order sit at the price level is (price : (total Qty & orders[])) ;
-          if (priceLevel?.orders.length == 0) {
-            opposingBook.delete(priceKey);
-          }
-        }
-      }
-      // update the last traded price with the most recent fills (temp array for this cycle ) in the table
-
-      if (fills.length > 0) {
-        book.lastTradedPrice = parseFloat(fills[fills.length - 1]!.price);
-
-        // this determines what the taker and maker orders are here 
-
-
-        const takerSide: "LONG" | "SHORT" = isBid ? "LONG" : "SHORT";
-
-        const makerSide: "LONG" | "SHORT" = isBid ? "SHORT" : "LONG";
-
-        // this is time to inalise an set for the affected users as this will hold the postions
-        // that we have to snapshot in the db via the redis queue called the db-events
-
-        const affectedUsers = new Set<string>();
-
-        // now we have to update the postions for each of the trader as
-        for (const fill of fills) {
-          // as we have to proccess each fill and update the postion for each of the party (maker/taker)
-
-          const fillQty = parseFloat(fill.qty);
-          const fillPrice = parseFloat(fill.price);
-          const makerLeverage = parseFloat(fill.makerUserLeverage);
-          // now we have extracted the makerLeverage form the fills
-
-          // tem to release the makerLocked balance
-          const makerBal = Balances.get(fill.makerUserId);
-
-          if (makerBal) {
-            const lockedBalance = parseFloat(makerBal.locked_bal);
-            const collateralToUnlock = (fillQty * fillPrice) / makerLeverage;
-            // either the entire balce gets liquadated or the maker has zero locked bal it cant go naegative
-            // so we fall back to zero
-            const updatedBalance = Math.max(
-              0,
-              lockedBalance - collateralToUnlock,
-            );
-
-            // we also have to set the makers balances now in the memory now that is done now
-            Balances.set(fill.makerUserId, {
-              available_bal: makerBal.available_bal,
-              locked_bal: updatedBalance.toString(),
-            });
-          }
-
-          //
-
-          // this is for the taker id
-          updatePositionFills(
-            userId,
-            marketId,
-            book.baseToken,
-            takerSide,
-            fill.qty,
-            fill.price,
-            userLeverage.toString(),
-          );
-
-          // this is for the maker id
-
-          updatePositionFills(
-            fill.makerUserId,
-            marketId,
-            book.baseToken,
-            makerSide,
-            fill.qty,
-            fill.price,
-            makerLeverage.toString(),
-          );
-
-          // now to record the taker and the maker id for db updation of postion
-          // as its a set all the dublicated values are already handled
-
-          affectedUsers.add(userId);
-          affectedUsers.add(fill.makerUserId);
-        }
-
-        // now the loop to update the postion as
-
-        for (const affectedUserId of affectedUsers) {
-          const posKey = `${affectedUserId}:${marketId}`;
-
-          const currentPosition = Positions.get(posKey);
-
-          // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means
-          // the postionn was deleted by the in memory array so we just update the size of the postion to be zero
-          const payload = currentPosition
-            ? {
-                userId: affectedUserId,
-                marketId,
-                size:
-                  currentPosition.side === "LONG"
-                    ? currentPosition?.qty
-                    : `-${currentPosition?.qty}`,
-                entryPrice: currentPosition?.entryPrice,
-                leverage: Number(currentPosition?.leverage),
-                liquidationPrice: null,
-              }
-            : {
-                userId: affectedUserId,
-                marketId,
-                size: "0",
-                leverage: "0",
-                liquidationPrice: null,
-              };
-
-          await publisher.xAdd("db-events", "*", {
-            eventType: "POSITION_UPDATED",
-            payload: JSON.stringify(payload),
-          });
-        }
-      }
-      // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over
-
-      let finalStatus: "FILLED" | "PARTIALLY_FILLED" | "OPEN" = "FILLED";
-
-      const exuctedQty = numQty - remaningQty; // this is the amount that is still left to be executed
-
-      if (remaningQty > 0) {
-        //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
-        if (orderType === "LIMIT") {
-          finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
-
-          // all the unfinished limit order must sit on the same side of the order book for all
-          const targetSide = isBid ? book.bids : book.asks;
-
-          // this is the price that the order was places upon
-          const restingPrice = price!;
-
-          // get all the orders at the that level & we add volume to that level
-          let level = targetSide.get(restingPrice);
-
-          if (!level) {
-            // if current price level does not exist then we create our own price
-            // this is the
-            level = {
-              totalQty: "0",
-              orders: [],
-            };
-
-            targetSide.set(restingPrice, level);
-          }
-          // if the that
-
-          //pushing our order to the level that was needed
-          const restingMarginLocked = command.reduceOnly
-            ? "0"
-            : ((remaningQty * numPrice) / userLeverage).toString();
-          // currently the order sits on the orderbook so we have to push that order to the in memory array of open positions
-          //
-          level.orders.push({
-            userId,
-            originalOrderId: orderId,
-            qty: numQty.toString(),
-            filledQty: exuctedQty.toString(),
-            leverage: userLeverage.toString(),
-            lockedMargin: restingMarginLocked,
-            reduceOnly: Boolean(command.reduceOnly),
-          });
-
-          //updating the depth of the order for that level
-          level.totalQty = (
-            parseFloat(level.totalQty) + remaningQty
-          ).toString();
-        } else if (orderType === "MARKET") {
-          finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
-
-          // calculate collateral locked for unfullfiled portain
-          // there is no point in holding the unused margin in this trade
-
-          const unusedMargin = command.reduceOnly
-            ? 0
-            : (remaningQty * numPrice) / userLeverage;
-
-          if (unusedMargin > 0) {
-            const latestBalance = Balances.get(userId);
-
-            Balances.set(userId, {
-              available_bal: (
-                parseFloat(latestBalance!.available_bal) + unusedMargin
-              ).toString(),
-              locked_bal: (
-                parseFloat(latestBalance!.locked_bal) - unusedMargin
-              ).toString(),
-            });
-          }
-        }
-      }
-
-      // now we unlock the collateral for the taker as well because the filled amount is now part of the postion
-      // and if there was price improvment refund we send that back to available bal
-      if (fills.length > 0 && !command.reduceOnly) {
-        const totalActualSpend = fills.reduce(
-          (sum, f) =>
-            sum + (parseFloat(f.qty) * parseFloat(f.price)) / userLeverage,
-          0,
-        );
-
-        const expectedSpent = (exuctedQty * numPrice) / userLeverage;
-
-        const priceImprovementRefund = Math.max(0, expectedSpent - totalActualSpend);
-
-        const latestBalance = Balances.get(userId) || {
-          available_bal: "0",
-          locked_bal: "0",
-        };
-
-        // release the executed margin from locked bal since it now lives in postions
-        // and add the price improvment refund back to avail balance
-        const newLockedBal = Math.max(
-          0,
-          parseFloat(latestBalance.locked_bal) - totalActualSpend - priceImprovementRefund,
-        ).toString();
-
-        const newAvailBal = (
-          parseFloat(latestBalance.available_bal) + priceImprovementRefund
-        ).toString();
-
-        Balances.set(userId, {
-          available_bal: newAvailBal,
-          locked_bal: newLockedBal,
-        });
-
-        // sync the taker balance to postgress through db events
-        await publisher.xAdd("db-events", "*", {
-          eventType: "WALLET_UPDATE",
-          payload: JSON.stringify({
-            userId,
-            amountAvail: newAvailBal,
-            amountLocked: newLockedBal,
-          }),
-        });
-      }
-      // the full order is now completed its order
-
-      await publisher.xAdd("to-backend", "*", {
-        loopbackId,
-        status: "SUCCESS",
-        data: JSON.stringify({
-          orderId,
-          marketId,
-          status: finalStatus,
-          exuctedQty: exuctedQty.toString(),
-          remaningQty: remaningQty.toString(),
-          fills,
-        }),
-
-        error: " ",
-      });
-
-      // now  for db persistance what we can do is
-
-      // find margin locked in the resting order
-      const remainingOrderMargin =
-        orderType === "LIMIT" && remaningQty > 0 && !command.reduceOnly
-          ? (remaningQty * numPrice) / userLeverage
-          : 0;
-
-      // persist to accecpt thr order first
-
-      await publisher.xAdd("db-events", "*", {
-        eventType: "ORDER_ACCEPTED",
-        payload: JSON.stringify({
-          orderId,
-          userId,
-          marketId,
-
-          orderType,
-          orderSide: side,
-
-          price: orderType === "LIMIT" ? price! : null,
-          qty,
-
-          timeInForce: command.timeInForce,
-          reduceOnly: Boolean(command.reduceOnly),
-
-          initialMargin: reqMargin.toString(),
-          lockedMargin: remainingOrderMargin.toString(),
-        }),
-      });
-
-      // the trades that actually executed
-      if (fills.length > 0) {
-        // we would add a seprate worker to make the db calls possible
-        await publisher.xAdd("db-events", "*", {
-          eventType: "TRADE_EXECUTED",
-          payload: JSON.stringify({
-            takerOrderId: orderId,
-            takerUserId: userId,
-            marketId,
-            fills,
-          }),
-        });
-      }
+      //     if (
+      //       parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty)
+      //     ) {
+      //       // this removes the order at index 0 and slides every other order by one position
+      //       priceLevel?.orders.shift();
+      //     }
+
+      //     // if all the oders at the order book are eaten then we delete that price level
+      //     // a price level is how much order sit at the price level is (price : (total Qty & orders[])) ;
+      //     if (priceLevel?.orders.length == 0) {
+      //       opposingBook.delete(priceKey);
+      //     }
+      //   }
+      // }
+      // // update the last traded price with the most recent fills (temp array for this cycle ) in the table
+
+      // if (fills.length > 0) {
+      //   book.lastTradedPrice = parseFloat(fills[fills.length - 1]!.price);
+
+      //   // this determines what the taker and maker orders are here
+
+      //   const takerSide: "LONG" | "SHORT" = isBid ? "LONG" : "SHORT";
+
+      //   const makerSide: "LONG" | "SHORT" = isBid ? "SHORT" : "LONG";
+
+      //   // this is time to inalise an set for the affected users as this will hold the postions
+      //   // that we have to snapshot in the db via the redis queue called the db-events
+
+      //   const affectedUsers = new Set<string>();
+
+      //   // now we have to update the postions for each of the trader as
+      //   for (const fill of fills) {
+      //     // as we have to proccess each fill and update the postion for each of the party (maker/taker)
+
+      //     const fillQty = parseFloat(fill.qty);
+      //     const fillPrice = parseFloat(fill.price);
+      //     const makerLeverage = parseFloat(fill.makerUserLeverage);
+      //     // now we have extracted the makerLeverage form the fills
+
+      //     // tem to release the makerLocked balance
+      //     const makerBal = Balances.get(fill.makerUserId);
+
+      //     if (makerBal) {
+      //       const lockedBalance = parseFloat(makerBal.locked_bal);
+      //       const collateralToUnlock = (fillQty * fillPrice) / makerLeverage;
+      //       // either the entire balce gets liquadated or the maker has zero locked bal it cant go naegative
+      //       // so we fall back to zero
+      //       const updatedBalance = Math.max(
+      //         0,
+      //         lockedBalance - collateralToUnlock,
+      //       );
+
+      //       // we also have to set the makers balances now in the memory now that is done now
+      //       Balances.set(fill.makerUserId, {
+      //         available_bal: makerBal.available_bal,
+      //         locked_bal: updatedBalance.toString(),
+      //       });
+      //     }
+
+      //     //
+
+      //     // this is for the taker id
+      //     updatePositionFills(
+      //       userId,
+      //       marketId,
+      //       book.baseToken,
+      //       takerSide,
+      //       fill.qty,
+      //       fill.price,
+      //       userLeverage.toString(),
+      //     );
+
+      //     // this is for the maker id
+
+      //     updatePositionFills(
+      //       fill.makerUserId,
+      //       marketId,
+      //       book.baseToken,
+      //       makerSide,
+      //       fill.qty,
+      //       fill.price,
+      //       makerLeverage.toString(),
+      //     );
+
+      //     // now to record the taker and the maker id for db updation of postion
+      //     // as its a set all the dublicated values are already handled
+
+      //     affectedUsers.add(userId);
+      //     affectedUsers.add(fill.makerUserId);
+      //   }
+
+      //   // now the loop to update the postion as
+
+      //   for (const affectedUserId of affectedUsers) {
+      //     const posKey = `${affectedUserId}:${marketId}`;
+
+      //     const currentPosition = Positions.get(posKey);
+
+      //     // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means
+      //     // the postionn was deleted by the in memory array so we just update the size of the postion to be zero
+      //     const payload = currentPosition
+      //       ? {
+      //           userId: affectedUserId,
+      //           marketId,
+      //           size:
+      //             currentPosition.side === "LONG"
+      //               ? currentPosition?.qty
+      //               : `-${currentPosition?.qty}`,
+      //           entryPrice: currentPosition?.entryPrice,
+      //           leverage: Number(currentPosition?.leverage),
+      //           liquidationPrice: null,
+      //         }
+      //       : {
+      //           userId: affectedUserId,
+      //           marketId,
+      //           size: "0",
+      //           leverage: "0",
+      //           liquidationPrice: null,
+      //         };
+
+      //     await publisher.xAdd("db-events", "*", {
+      //       eventType: "POSITION_UPDATED",
+      //       payload: JSON.stringify(payload),
+      //     });
+      //   }
+      // }
+      // // this is now the post matching logic , the order that could be swapped is swaped alrady we can move ahead from here so this cycle is over
+
+      // let finalStatus: "FILLED" | "PARTIALLY_FILLED" | "OPEN" = "FILLED";
+
+      // const exuctedQty = numQty - remaningQty; // this is the amount that is still left to be executed
+
+      // if (remaningQty > 0) {
+      //   //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
+      //   if (orderType === "LIMIT") {
+      //     finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
+
+      //     // all the unfinished limit order must sit on the same side of the order book for all
+      //     const targetSide = isBid ? book.bids : book.asks;
+
+      //     // this is the price that the order was places upon
+      //     const restingPrice = price!;
+
+      //     // get all the orders at the that level & we add volume to that level
+      //     let level = targetSide.get(restingPrice);
+
+      //     if (!level) {
+      //       // if current price level does not exist then we create our own price
+      //       // this is the
+      //       level = {
+      //         totalQty: "0",
+      //         orders: [],
+      //       };
+
+      //       targetSide.set(restingPrice, level);
+      //     }
+      //     // if the that
+
+      //     //pushing our order to the level that was needed
+      //     const restingMarginLocked = command.reduceOnly
+      //       ? "0"
+      //       : ((remaningQty * numPrice) / userLeverage).toString();
+      //     // currently the order sits on the orderbook so we have to push that order to the in memory array of open positions
+      //     //
+      //     level.orders.push({
+      //       userId,
+      //       originalOrderId: orderId,
+      //       qty: numQty.toString(),
+      //       filledQty: exuctedQty.toString(),
+      //       leverage: userLeverage.toString(),
+      //       lockedMargin: restingMarginLocked,
+      //       reduceOnly: Boolean(command.reduceOnly),
+      //     });
+
+      //     //updating the depth of the order for that level
+      //     level.totalQty = (
+      //       parseFloat(level.totalQty) + remaningQty
+      //     ).toString();
+      //   } else if (orderType === "MARKET") {
+      //     finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
+
+      //     // calculate collateral locked for unfullfiled portain
+      //     // there is no point in holding the unused margin in this trade
+
+      //     const unusedMargin = command.reduceOnly
+      //       ? 0
+      //       : (remaningQty * numPrice) / userLeverage;
+
+      //     if (unusedMargin > 0) {
+      //       const latestBalance = Balances.get(userId);
+
+      //       Balances.set(userId, {
+      //         available_bal: (
+      //           parseFloat(latestBalance!.available_bal) + unusedMargin
+      //         ).toString(),
+      //         locked_bal: (
+      //           parseFloat(latestBalance!.locked_bal) - unusedMargin
+      //         ).toString(),
+      //       });
+      //     }
+      //   }
+      // }
+
+      // // now we unlock the collateral for the taker as well because the filled amount is now part of the postion
+      // // and if there was price improvment refund we send that back to available bal
+      // if (fills.length > 0 && !command.reduceOnly) {
+      //   const totalActualSpend = fills.reduce(
+      //     (sum, f) =>
+      //       sum + (parseFloat(f.qty) * parseFloat(f.price)) / userLeverage,
+      //     0,
+      //   );
+
+      //   const expectedSpent = (exuctedQty * numPrice) / userLeverage;
+
+      //   const priceImprovementRefund = Math.max(0, expectedSpent - totalActualSpend);
+
+      //   const latestBalance = Balances.get(userId) || {
+      //     available_bal: "0",
+      //     locked_bal: "0",
+      //   };
+
+      //   // release the executed margin from locked bal since it now lives in postions
+      //   // and add the price improvment refund back to avail balance
+      //   const newLockedBal = Math.max(
+      //     0,
+      //     parseFloat(latestBalance.locked_bal) - totalActualSpend - priceImprovementRefund,
+      //   ).toString();
+
+      //   const newAvailBal = (
+      //     parseFloat(latestBalance.available_bal) + priceImprovementRefund
+      //   ).toString();
+
+      //   Balances.set(userId, {
+      //     available_bal: newAvailBal,
+      //     locked_bal: newLockedBal,
+      //   });
+
+      //   // sync the taker balance to postgress through db events
+      //   await publisher.xAdd("db-events", "*", {
+      //     eventType: "WALLET_UPDATE",
+      //     payload: JSON.stringify({
+      //       userId,
+      //       amountAvail: newAvailBal,
+      //       amountLocked: newLockedBal,
+      //     }),
+      //   });
+      // }
+      // // the full order is now completed its order
+
+      // await publisher.xAdd("to-backend", "*", {
+      //   loopbackId,
+      //   status: "SUCCESS",
+      //   data: JSON.stringify({
+      //     orderId,
+      //     marketId,
+      //     status: finalStatus,
+      //     exuctedQty: exuctedQty.toString(),
+      //     remaningQty: remaningQty.toString(),
+      //     fills,
+      //   }),
+
+      //   error: " ",
+      // });
+
+      // // now  for db persistance what we can do is
+
+      // // find margin locked in the resting order
+      // const remainingOrderMargin =
+      //   orderType === "LIMIT" && remaningQty > 0 && !command.reduceOnly
+      //     ? (remaningQty * numPrice) / userLeverage
+      //     : 0;
+
+      // // persist to accecpt thr order first
+
+      // await publisher.xAdd("db-events", "*", {
+      //   eventType: "ORDER_ACCEPTED",
+      //   payload: JSON.stringify({
+      //     orderId,
+      //     userId,
+      //     marketId,
+
+      //     orderType,
+      //     orderSide: side,
+
+      //     price: orderType === "LIMIT" ? price! : null,
+      //     qty,
+
+      //     timeInForce: command.timeInForce,
+      //     reduceOnly: Boolean(command.reduceOnly),
+
+      //     initialMargin: reqMargin.toString(),
+      //     lockedMargin: remainingOrderMargin.toString(),
+      //   }),
+      // });
+
+      // // the trades that actually executed
+      // if (fills.length > 0) {
+      //   // we would add a seprate worker to make the db calls possible
+      //   await publisher.xAdd("db-events", "*", {
+      //     eventType: "TRADE_EXECUTED",
+      //     payload: JSON.stringify({
+      //       takerOrderId: orderId,
+      //       takerUserId: userId,
+      //       marketId,
+      //       fills,
+      //     }),
+      //   });
+      // }
       // now the create order endpoint is finally done bro
       // its done BRO ;)
 
@@ -1253,9 +1806,9 @@ while (true) {
         continue;
       }
 
-      const rawbaseToken = baseToken?.toUpperCase();
+      const rawBaseToken = baseToken?.toUpperCase();
 
-      if (!rawbaseToken || !baseTokenToMarkets.has(rawbaseToken)) {
+      if (!rawBaseToken || !baseTokenToMarkets.has(rawBaseToken)) {
         console.log("this base token does not exist in the project broo");
 
         await publisher.xAdd("to-backend", "*", {
@@ -1269,11 +1822,30 @@ while (true) {
         continue;
       }
 
-      // time to piggyback the existing tokens to the already defines base tokens in the program
-      const existingMarkets = baseTokenToMarkets.get(rawbaseToken) ?? [];
-      baseTokenToMarkets.set(rawbaseToken, [...existingMarkets, marketId]);
+      const numTickSize = Number(tickSize);
+      const numStepSize = Number(stepSize);
 
-      const currentMarkPrice = markPrices.get(baseToken);
+      if (
+        !Number.isFinite(numStepSize) ||
+        !Number.isFinite(numTickSize) ||
+        numTickSize <= 0 ||
+        numStepSize <= 0
+      ) {
+        await publisher.xAdd("to-backend", "*", {
+          loopbackId,
+          status: "REJECTED",
+          data: "",
+          error: "THE_TICK_SIZE_IS_INVAILD_BRO",
+        });
+        await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue;
+      }
+
+      // time to piggyback the existing tokens to the already defines base tokens in the program
+      const existingMarkets = baseTokenToMarkets.get(rawBaseToken) ?? [];
+      baseTokenToMarkets.set(rawBaseToken, [...existingMarkets, marketId]);
+
+      const currentMarkPrice = markPrices.get(rawBaseToken);
 
       // now we have vaildated  that the engine exists then we move ahead and create an orderbook
 
@@ -1283,7 +1855,7 @@ while (true) {
         lastTradedPrice: currentMarkPrice ? parseFloat(currentMarkPrice) : 0,
         tickSize,
         stepSize,
-        baseToken: baseToken,
+        baseToken: rawBaseToken,
         bids: new Map<string, PriceLevel>(),
         asks: new Map<string, PriceLevel>(),
       };
@@ -1414,13 +1986,11 @@ while (true) {
 
       let orderPrice: string | null = null;
 
-      let unfilledQty = "0";  
+      let unfilledQty = "0";
 
-      let sideP : "LONG" | "SHORT" = side == "BID" ? "LONG" : "SHORT";
+      let sideP: "LONG" | "SHORT" = side == "BID" ? "LONG" : "SHORT";
 
       let baseToken = book.baseToken;
-
-      
 
       if (side !== "BID" && side !== "ASK") {
         await publisher.xAdd("to-backend", "*", {
@@ -1452,7 +2022,8 @@ while (true) {
             orderPrice = priceKey;
 
             // this is the reamaing qty at the order that was found
-            const unExexcutedQty = parseFloat(foundOrder.qty) - parseFloat(foundOrder.filledQty);
+            const unExexcutedQty =
+              parseFloat(foundOrder.qty) - parseFloat(foundOrder.filledQty);
 
             // now we get the user balances for this type
 
@@ -1464,15 +2035,21 @@ while (true) {
             // this is the margi tied to this order by the user - we calauclate pro rated remaining margin
             const remainingMargin = foundOrder.reduceOnly
               ? 0
-              : (unExexcutedQty * parseFloat(priceKey)) / parseFloat(foundOrder.leverage || "1");
+              : (unExexcutedQty * parseFloat(priceKey)) /
+                parseFloat(foundOrder.leverage || "1");
 
             const marginToUnlock = Math.min(
               remainingMargin,
               parseFloat(UserBalance?.locked_bal || "0"),
             );
 
-            const newAvailBal = (parseFloat(UserBalance.available_bal) + marginToUnlock).toString();
-            const newLockedBal = Math.max(0, parseFloat(UserBalance.locked_bal) - marginToUnlock).toString();
+            const newAvailBal = (
+              parseFloat(UserBalance.available_bal) + marginToUnlock
+            ).toString();
+            const newLockedBal = Math.max(
+              0,
+              parseFloat(UserBalance.locked_bal) - marginToUnlock,
+            ).toString();
 
             Balances.set(userId, {
               available_bal: newAvailBal,
@@ -1496,9 +2073,9 @@ while (true) {
             // update the quanty at the level
             level.totalQty = (
               parseFloat(level.totalQty) - unExexcutedQty
-            ).toString(); 
+            ).toString();
 
-             unfilledQty =  unExexcutedQty.toString() ;
+            unfilledQty = unExexcutedQty.toString();
 
             if (level.orders.length == 0) {
               book.bids.delete(priceKey);
@@ -1540,15 +2117,21 @@ while (true) {
             // this is the margi tied to this order by the user - we calauclate pro rated remaining margin
             const remainingMargin = foundOrder.reduceOnly
               ? 0
-              : (unExexcutedQty * parseFloat(priceKey)) / parseFloat(foundOrder.leverage || "1");
+              : (unExexcutedQty * parseFloat(priceKey)) /
+                parseFloat(foundOrder.leverage || "1");
 
             const marginToUnlock = Math.min(
               remainingMargin,
               parseFloat(UserBalance?.locked_bal || "0"),
             );
 
-            const newAvailBal = (parseFloat(UserBalance.available_bal) + marginToUnlock).toString();
-            const newLockedBal = Math.max(0, parseFloat(UserBalance.locked_bal) - marginToUnlock).toString();
+            const newAvailBal = (
+              parseFloat(UserBalance.available_bal) + marginToUnlock
+            ).toString();
+            const newLockedBal = Math.max(
+              0,
+              parseFloat(UserBalance.locked_bal) - marginToUnlock,
+            ).toString();
 
             Balances.set(userId, {
               available_bal: newAvailBal,
@@ -1626,7 +2209,68 @@ while (true) {
     }
 
     if (command.messageType == "EXIT_POSITION") {
-      // this is currently not supported directly here, user should place an opposing reduceOnly order
+      // this mesage type is basiclly an call back to the the create order type as that this is essentially
+      // an aggresive order that is for the market side and with the reduce only set to true
+
+      const { userId, marketId, orderId, qty } = command;
+
+      const book = orderBook.get(marketId);
+
+      if (!book) {
+        await publisher.xAdd("to-backend", "*", {
+          loopbackId,
+          status: "REJECTED",
+          data: "",
+          error: "THE_BOOK_DOES_NOT_EXIST_BROTHER",
+        });
+        await clientRead.xAdd(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue;
+      }
+
+      // to find the postion of the user in the maekt
+
+      const posKey = `${userId}:${marketId}`;
+      const Position = Positions.get(posKey);
+
+      if (!Position) {
+        await publisher.xAdd("to-backend", "*", {
+          loopbackId,
+          status: "REJECTED",
+          data: "",
+          error: "MARKET_NOT_FOUND_BRO",
+        });
+
+        await clientRead.xAdd(STREAM_KEY, ENGINE_GROUP, entry.id);
+        continue;
+      }
+
+      // now we have the postion with us lets now start to make the order that will work on the create order
+      // endpoint here lets start
+
+      const currentPositionQty = parseFloat(Position.qty);
+      const currentRequestedQty = qty ? parseFloat(qty) : currentPositionQty;
+
+      const exitSide = Position.side === "LONG" ? "ASK" : "BID";
+
+      const exitQty = Math.min(currentRequestedQty, currentPositionQty);
+
+      // now we have all the things to create an syntetic order
+      // The terms as ioc and fok is not implemented in the engine yet we have to do that
+      const DummyOrder: toEngine = {
+        messageType: "CREATE_ORDER",
+        orderId,
+        marketId,
+        userId,
+        side: exitSide,
+        qty: exitQty.toString(),
+        price: undefined,
+        leverage: Position.leverage || "1",
+        reduceOnly: true,
+        timeInForce: "IOC",
+        orderType: "LIMIT",
+      };
+      // the dummy order is now created we have to pass this order to the matchiing engine now
+
       await publisher.xAdd("to-backend", "*", {
         loopbackId,
         status: "REJECTED",

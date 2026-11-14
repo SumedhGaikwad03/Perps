@@ -4,7 +4,7 @@
 
 
 export type orderSide = "BID" | "ASK" 
-export type TimeInForce = "GTC" | "FOK" 
+export type TimeInForce = "GTC" | "FOK" | "IOC" 
 
 export type OrderType = "LIMIT" | "MARKET"
 
@@ -74,23 +74,22 @@ export type toEngine =  {
 
     } | {
 
+        // this endpoint is also not in use we can use our existing end point here 
         messageType : "EXIT_POSITION" , 
 
-        marketId : string , 
-
-        markPrice : string , 
+        marketId : string ,  
 
         qty  : string ,
 
         orderId : string ,
 
         userId : string ,
-
-        side : orderSide
+ 
 
     } | {
 
-        // i dont think this will be used that much ig 
+        // i dont think this will be used that much ig this is a test endpoint now 
+
         messageType : "MODIFY_ORDER"
 
         userId : string ,
@@ -185,7 +184,18 @@ export interface MarketCreatedPayload {
 
     tickSize : string , 
 
-    stepSize : string,}
+    stepSize : string,
+}
+
+export interface OrderResult {
+
+    marketId : string  ,
+    orderId : string ,
+    status : "FILLED" | "PARTIALLY_FILLED" | " OPEN" | " " ;
+    executedQty : string ,
+    remainingQty : string ,
+    fills : Tradefill[]  // has all the info about the maker and the all the thingd he has 
+} 
 
 // export type dbEvent = 
 //  | "TRADE_EXECUTED" 
@@ -207,7 +217,8 @@ export interface MarketCreatedPayload {
     POSITION_BANKRUPT : PositionBankruptPayload,
     MARKET_CREATED : MarketCreatedPayload,
     ORDER_ACCEPTED: OrderAcceptedPayload,
-    POSITION_UPDATED : PositionUpdatePayload
+    POSITION_UPDATED : PositionUpdatePayload,
+    WALLET_UPDATE : WalletTransactionPayload
 
  }
 
@@ -264,6 +275,14 @@ export interface PositionUpdatePayload{
     entryPrice : string,
     leverage : number ,
      liquidationPrice : string | null 
+}
+
+export interface MatchingResponse { 
+
+    toEngine : toEngine , // this will have the endpoint that will have the all the req 
+    
+
+
 }
 
 

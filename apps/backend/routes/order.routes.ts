@@ -139,3 +139,59 @@ orderRouter.delete(`/order/:orderId`, authmiddleware, async (req: any, res) => {
     });
   }
 }); 
+
+// this is the route that is used to exit an current postion in the market as an exit order is basically an
+// aggrasive order with the reduce only part is true 
+
+orderRouter.post(`api/v1/exitPosition` , authmiddleware , async (req : any , res )=> {
+ try {
+  // this is the way to destructure the request that is sent by the user here 
+  const userId = req.userId ; 
+  const {marketId , qty ,  } = req.body;  
+
+  if( !marketId || !qty ){
+
+    return res.status(403).json({message : " The market does not exists bro or the qty is invaild "});
+  } 
+
+  if(!Number(qty)){
+
+    return res.status(400).json({message : "Invaild status qutanty"}); 
+
+  }
+
+  // now all the vaules are extarted its time to start now 
+
+  const orderId = Bun.randomUUIDv7(); 
+
+
+  // this request is sent to the engine now via the loopback file which give this req an id here 
+  
+  const engineReply : any = await loopback({
+     messageType : "EXIT_POSITION" ,
+     userId,
+     marketId,
+     orderId, 
+    // we have to define the qty as the suppiled qty or we can just assume all of the qty is sent by the user 
+     qty : qty ? qty.toString() : undefined  
+
+  });
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+ }catch {
+
+
+ }
+});
