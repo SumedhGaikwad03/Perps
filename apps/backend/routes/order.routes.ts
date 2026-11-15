@@ -5,7 +5,7 @@ import { authmiddleware } from "../middleWare/authMiddleware";
 
 export const orderRouter = Router();
 
-orderRouter.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
+orderRouter.post(`/order`, authmiddleware, async (req: any, res) => {
   // we extarct the user id from the jwt middleware
   try {
     const userId = req.userId;
@@ -21,32 +21,83 @@ orderRouter.post(`/api/v1/order`, authmiddleware, async (req: any, res) => {
       price,
     } = req.body;
 
-    // check every incoming order stream if the stram is vaild or not 
+    // check every incoming order stream if the fields are valid or not
+    if (!marketId || typeof marketId !== "string" || marketId.trim() === "") {
+      return res.status(400).json({ message: "Invalid marketId" });
+    }
 
-    const isSideTrue = side === "BID" || side === "ASK" ; 
+    if (side !== "BID" && side !== "ASK") {
+      return res.status(400).json({ message: "Invalid order side" });
+    }
 
-    const isOrderTypeVaild = orderType === "LIMIT" || orderType === "MARKET" ; 
+    if (orderType !== "LIMIT" && orderType !== "MARKET") {
+      return res.status(400).json({ message: "Invalid orderType" });
+    }
 
+    if (timeInForce !== "GTC" && timeInForce !== "FOK") {
+      return res.status(400).json({ message: "Invalid timeInForce" });
+    }
+
+    if (req.body.reduceOnly !== undefined && typeof req.body.reduceOnly !== "boolean") {
+      return res.status(400).json({ message: "Invalid reduceOnly type" });
+    }
+
+    if (
+      qty === null ||
+      qty === undefined ||
+      Array.isArray(qty) ||
+      typeof qty === "object" ||
+      typeof qty === "boolean" ||
+      (typeof qty === "string" && qty.trim() === "")
+    ) {
+      return res.status(400).json({ message: "Invalid quantity format" });
+    }
     const numQty = Number(qty);
+    if (!Number.isFinite(numQty) || isNaN(numQty) || numQty <= 0) {
+      return res.status(400).json({ message: "Invalid quantity value" });
+    }
 
+    if (
+      leverage === null ||
+      Array.isArray(leverage) ||
+      typeof leverage === "object" ||
+      typeof leverage === "boolean"
+    ) {
+      return res.status(400).json({ message: "Invalid leverage format" });
+    }
     const numLeverage = Number(leverage);
+    if (!Number.isFinite(numLeverage) || isNaN(numLeverage) || numLeverage <= 0) {
+      return res.status(400).json({ message: "Invalid leverage value" });
+    }
 
-    const numPrice = Number(price); 
-
-    const isQtyVaild = Number.isFinite(numQty) && numQty >0 ;
-
-    const isLeverageVaild = Number.isFinite(numLeverage) && numLeverage > 0 ;
-
-    const isPriceVaild = orderType === "MARKET" || orderType === "LIMIT" && price !== undefined && price != null && Number.isFinite(numPrice)&& numPrice>0
-
- 
-    if (!isQtyVaild || !isSideTrue || !marketId || !isOrderTypeVaild || !isLeverageVaild || !isPriceVaild  ) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "The market order is getting invalidated due to a lack of fields or wrong fields ",
-        });
+    if (orderType === "LIMIT") {
+      if (
+        price === null ||
+        price === undefined ||
+        Array.isArray(price) ||
+        typeof price === "object" ||
+        typeof price === "boolean" ||
+        (typeof price === "string" && price.trim() === "")
+      ) {
+        return res.status(400).json({ message: "Invalid price format" });
+      }
+      const numPrice = Number(price);
+      if (!Number.isFinite(numPrice) || isNaN(numPrice) || numPrice <= 0) {
+        return res.status(400).json({ message: "Invalid price value" });
+      }
+    } else if (price !== undefined && price !== null) {
+      if (
+        Array.isArray(price) ||
+        typeof price === "object" ||
+        typeof price === "boolean" ||
+        (typeof price === "string" && price.trim() === "")
+      ) {
+        return res.status(400).json({ message: "Invalid price format" });
+      }
+      const numPrice = Number(price);
+      if (!Number.isFinite(numPrice) || isNaN(numPrice) || numPrice <= 0) {
+        return res.status(400).json({ message: "Invalid price value" });
+      }
     }
 
 
@@ -143,55 +194,44 @@ orderRouter.delete(`/order/:orderId`, authmiddleware, async (req: any, res) => {
 // this is the route that is used to exit an current postion in the market as an exit order is basically an
 // aggrasive order with the reduce only part is true 
 
-orderRouter.post(`api/v1/exitPosition` , authmiddleware , async (req : any , res )=> {
- try {
-  // this is the way to destructure the request that is sent by the user here 
-  const userId = req.userId ; 
-  const {marketId , qty ,  } = req.body;  
+orderRouter.post(`/exitPosition`, authmiddleware, async (req: any, res) => {
+  try {
+    // this is the way to destructure the request that is sent by the user here 
+    const userId = req.userId;
+    const { marketId, qty } = req.body;
 
-  if( !marketId || !qty ){
+    if (!marketId || !qty) {
+      return res.status(403).json({ message: " The market does not exists bro or the qty is invaild " });
+    }
 
-    return res.status(403).json({message : " The market does not exists bro or the qty is invaild "});
-  } 
+    if (!Number(qty)) {
+      return res.status(400).json({ message: "Invaild status qutanty" });
+    }
 
-  if(!Number(qty)){
+    // now all the vaules are extarted its time to start now 
+    const orderId = Bun.randomUUIDv7();
 
-    return res.status(400).json({message : "Invaild status qutanty"}); 
+    // this request is sent to the engine now via the loopback file which give this req an id here 
+    const engineReply: any = await loopback({
+      messageType: "EXIT_POSITION",
+      userId,
+      marketId,
+      orderId,
+      // we have to define the qty as the suppiled qty or we can just assume all of the qty is sent by the user 
+      qty: qty ? qty.toString() : undefined,
+    });
 
+    if (engineReply?.status === "REJECTED") {
+      return res.status(400).json({ message: engineReply.error || "Exit position rejected" });
+    }
+
+    return res.status(200).json({
+      orderId,
+      message: "Exit position requested",
+      result: engineReply,
+    });
+  } catch (error) {
+    console.error("exit position error:", error);
+    return res.status(500).json({ message: "Internal Server Error", details: String(error) });
   }
-
-  // now all the vaules are extarted its time to start now 
-
-  const orderId = Bun.randomUUIDv7(); 
-
-
-  // this request is sent to the engine now via the loopback file which give this req an id here 
-  
-  const engineReply : any = await loopback({
-     messageType : "EXIT_POSITION" ,
-     userId,
-     marketId,
-     orderId, 
-    // we have to define the qty as the suppiled qty or we can just assume all of the qty is sent by the user 
-     qty : qty ? qty.toString() : undefined  
-
-  });
-
-
-
-
-
-
-
-
-
-
-  
-
-
-
- }catch {
-
-
- }
 });

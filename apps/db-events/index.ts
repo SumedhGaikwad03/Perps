@@ -89,8 +89,20 @@ async function startWorker() {
           );
         }
       }
-    } catch (loopError) {
+    } catch (loopError: any) {
       console.error(`there was an enexpected steam error as `, loopError);
+      if (loopError?.message?.includes("NOGROUP")) {
+        try {
+          await redis.xGroupCreate(STREAM_KEY, CONSUMER_GROUP, "0", {
+            MKSTREAM: true,
+          });
+          console.log("Successfully recreated db-consumer-group");
+        } catch (groupErr: any) {
+          if (!groupErr?.message?.includes("BUSYGROUP")) {
+            console.error("Failed to re-create db group:", groupErr);
+          }
+        }
+      }
     }
   }
 }
@@ -280,8 +292,6 @@ async function handelPositionUpdated(payload: Payloads.PositionUpdatePayload) {
   const { userId, marketId, size, entryPrice, leverage, liquidationPrice } =
     payload;
 
-    console.log(`saving this shi to the database ${payload}`);
-
   await prisma.position.upsert({
     where: {
       userId_marketId: {
@@ -290,18 +300,18 @@ async function handelPositionUpdated(payload: Payloads.PositionUpdatePayload) {
       },
     },
     update: {
-      size,
-      entryPrice,
-      leverage,
-      liquidationPrice,
+      size: String(size ?? "0"),
+      entryPrice: String(entryPrice ?? "0"),
+      leverage: Number(leverage) || 0,
+      liquidationPrice: liquidationPrice ?? null,
     },
     create: {
       userId,
       marketId,
-      size,
-      entryPrice,
-      leverage,
-      liquidationPrice,
+      size: String(size ?? "0"),
+      entryPrice: String(entryPrice ?? "0"),
+      leverage: Number(leverage) || 0,
+      liquidationPrice: liquidationPrice ?? null,
     },
   });
 }

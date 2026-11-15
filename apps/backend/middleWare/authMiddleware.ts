@@ -42,26 +42,34 @@ export function authmiddleware ( req : Request , res: Response , next :NextFunct
 
 export function adminMiddleWare(req : Request , res : Response , next : NextFunction){
 
-    const adminToken = req.headers.token as string ; 
+    const adminSecret =
+        (req.headers.admin_secret as string) ||
+        (req.headers["x-admin-token"] as string) ||
+        (req.headers.token as string); 
 
-    try {
-
-        const decoded = jwt.verify(adminToken , process.env.ADMIN_SECRET!) as JwtPayload; 
-
-        if(decoded.userId){
-            
-            req.userId = decoded.userId; 
-          
-            next();
+    // If raw admin secret matches ADMIN_SECRET
+    if (adminSecret && adminSecret === process.env.ADMIN_SECRET) {
+        if (req.headers.token) {
+            try {
+                const userDecoded = jwt.verify(req.headers.token as string, process.env.JWT_SECRET!) as JwtPayload;
+                if (userDecoded?.userId) {
+                    (req as any).userId = userDecoded.userId;
+                }
+            } catch (e) {}
         }
-        else {
-
-            return res.status(403).json({message : "TOken id  is invaild bro "});
-        }
-
-    }catch(e){
-
-        
-            return res.status(403).json({message : "TOken is invaild bro "});
+        return next();
     }
+
+    // If signed JWT passed
+    if (adminSecret) {
+        try {
+            const decoded = jwt.verify(adminSecret, process.env.ADMIN_SECRET!) as JwtPayload; 
+            if(decoded && decoded.userId){
+                (req as any).userId = decoded.userId; 
+                return next();
+            }
+        } catch(e) {}
+    }
+
+    return res.status(403).json({message : "Token is invaild bro "});
 }

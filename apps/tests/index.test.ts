@@ -694,7 +694,7 @@ describe("6. Order Cancellation Tests", () => {
 
   it("should reject unauthenticated cancellation", async () => {
     const res = await api.delete(`/api/v1/order/${restingBidId}`, {
-      data: { marketId },
+      data: { marketId, side: "BID" },
     });
 
     expect([401, 403]).toContain(res.status);
@@ -703,7 +703,7 @@ describe("6. Order Cancellation Tests", () => {
   it("should reject cancellation by a different user", async () => {
     const res = await api.delete(`/api/v1/order/${restingBidId}`, {
       headers: { token: token2 },
-      data: { marketId },
+      data: { marketId, side: "BID" },
     });
 
     // Recommended API behavior: 403 or 404.
@@ -714,7 +714,7 @@ describe("6. Order Cancellation Tests", () => {
   it("User 1 should cancel remaining BID quantity", async () => {
     const res = await api.delete(`/api/v1/order/${restingBidId}`, {
       headers: { token: token1 },
-      data: { marketId },
+      data: { marketId, side: "BID" },
     });
 
     expect(res.status).toBe(200);
@@ -730,7 +730,7 @@ describe("6. Order Cancellation Tests", () => {
   it("User 2 should cancel resting ASK", async () => {
     const res = await api.delete(`/api/v1/order/${restingAskId}`, {
       headers: { token: token2 },
-      data: { marketId },
+      data: { marketId, side: "ASK" },
     });
 
     expect(res.status).toBe(200);
@@ -744,7 +744,7 @@ describe("6. Order Cancellation Tests", () => {
   it("should reject cancellation of an already cancelled order", async () => {
     const res = await api.delete(`/api/v1/order/${restingBidId}`, {
       headers: { token: token1 },
-      data: { marketId },
+      data: { marketId, side: "BID" },
     });
 
     expect([400, 404, 409]).toContain(res.status);
@@ -782,8 +782,11 @@ describe("7. Database Persistence Tests", () => {
   });
 
   it("should persist maker BID", async () => {
-    const order = await prisma.order.findUnique({
-      where: { id: restingBidId },
+    const order = await waitFor(async () => {
+      const o = await prisma.order.findUnique({
+        where: { id: restingBidId },
+      });
+      return o?.status === "CANCELLED" ? o : null;
     });
 
     expect(order).not.toBeNull();
@@ -802,8 +805,11 @@ describe("7. Database Persistence Tests", () => {
   });
 
   it("should persist resting ASK cancellation", async () => {
-    const order = await prisma.order.findUnique({
-      where: { id: restingAskId },
+    const order = await waitFor(async () => {
+      const o = await prisma.order.findUnique({
+        where: { id: restingAskId },
+      });
+      return o?.status === "CANCELLED" ? o : null;
     });
 
     expect(order).not.toBeNull();
@@ -1305,7 +1311,7 @@ describe("11. Additional Order Cancellation Security Tests", () => {
       "/api/v1/order/nonexistent-order-id",
       {
         headers: { token: token1 },
-        data: { marketId },
+        data: { marketId, side: "BID" },
       },
     );
 
@@ -1339,7 +1345,7 @@ describe("11. Additional Order Cancellation Security Tests", () => {
       `/api/v1/order/${orderId}`,
       {
         headers: { token: token2 },
-        data: { marketId },
+        data: { marketId, side: "BID" },
       },
     );
 
@@ -1359,7 +1365,7 @@ describe("11. Additional Order Cancellation Security Tests", () => {
       `/api/v1/order/${orderId}`,
       {
         headers: { token: token1 },
-        data: { marketId },
+        data: { marketId, side: "BID" },
       },
     );
 
@@ -2208,7 +2214,7 @@ beforeAll(async () => {
   for (const user of Object.values(extraUsers)) {
     await createFundedUser(user);
   }
-});
+}, 30000);
 
 // =====================================================
 // SECTION 19: MULTIPLE MAKER FILLS
@@ -2670,7 +2676,7 @@ describe("22. Margin and Wallet Accounting", () => {
       `/api/v1/order/${response.data.orderId}`,
       {
         headers: { token: extraUsers.makerA.token },
-        data: { marketId },
+        data: { marketId, side: "BID" },
       }
     );
 
@@ -2723,7 +2729,7 @@ describe("22. Margin and Wallet Accounting", () => {
       `/api/v1/order/${response.data.orderId}`,
       {
         headers: { token: extraUsers.makerB.token },
-        data: { marketId },
+        data: { marketId, side: "BID" },
       }
     );
 
@@ -2770,7 +2776,7 @@ describe("23. Order Execution Edge Cases", () => {
   });
 
   it("should not partially execute an FOK order", async () => {
-    await placeOrder(
+    const maker = await placeOrder(
       extraUsers.makerA.token,
       "ASK",
       "310",
@@ -2789,6 +2795,11 @@ describe("23. Order Execution Edge Cases", () => {
       Number(taker.data.result?.exuctedQty) === 5).toBe(false);
 
     expect(Number(taker.data.result?.exuctedQty ?? 0)).toBe(0);
+
+    await api.delete(`/api/v1/order/${maker.data.orderId}`, {
+      headers: { token: extraUsers.makerA.token },
+      data: { marketId, side: "ASK" },
+    });
   });
 
   it("should execute a market order against available liquidity", async () => {

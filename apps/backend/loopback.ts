@@ -10,16 +10,15 @@ const subscriber = createClient();
 // this is the counsuner group that consumes/listens request from the backend
 
 const BACKEND_CONSUMER_GROUP = "backend-consumer-group";
-const CONSUMER_NAME = "backend-instance-one";
+const WORKER_NAME = "backend-instance-one";
 
 // this is the object we store in the loopback resolves id that will have an identfier and the object that will be of this shape
 // to resolve or reject the promise
-
 interface DefferedPromise {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
   timer?: ReturnType<typeof setTimeout>; // we store timeout id here
-}
+} 
 
 async function initializeRedis() {
   await Promise.all([client.connect(), subscriber.connect()]);
@@ -106,7 +105,7 @@ async function main() {
     // the consumer name is the consumer that is assaigned to read form the queue to backend
     const currentMsg = await subscriber.xReadGroup(
       BACKEND_CONSUMER_GROUP,
-      CONSUMER_NAME,
+      WORKER_NAME,
       [
         {
           key: "to-backend",
@@ -160,8 +159,20 @@ async function main() {
       // this message ack that the consumer "BACKEND CONSUMER GROUP " group has sucessfully acked the request the "to-backend" req w
       // with the entry.id as in that request is sorted
       await subscriber.xAck("to-backend", BACKEND_CONSUMER_GROUP, entry.id); // this snipped tell that the
-    } catch (error) {
+    } catch (error: any) {
       console.log("consumer erroe in backend ", error);
+      if (error?.message?.includes("NOGROUP")) {
+        try {
+          await client.xGroupCreate("to-backend", BACKEND_CONSUMER_GROUP, "0", {
+            MKSTREAM: true,
+          });
+          console.log("Successfully recreated backend-consumer-group");
+        } catch (groupErr: any) {
+          if (!groupErr?.message?.includes("BUSYGROUP")) {
+            console.error("Failed to re-create backend group:", groupErr);
+          }
+        }
+      }
     }
   }
 }

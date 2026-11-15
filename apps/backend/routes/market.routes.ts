@@ -28,6 +28,13 @@ marketRouter.post("/admin/market", adminMiddleWare, async (req, res) => {
         .json({ message: "The body is for request is not complete bro  " });
     }
 
+    const SUPPORTED_BASE_TOKENS = ["BTC", "SOL", "ETH"];
+    if (!SUPPORTED_BASE_TOKENS.includes(baseToken)) {
+      return res
+        .status(400)
+        .json({ message: "Unsupported base token bro" });
+    }
+
     // now to check if the tick size is vaild or not
 
     const numTick = Number(tickSize);

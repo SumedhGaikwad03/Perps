@@ -12,9 +12,22 @@ collateralRouter.post("/onRamp", authmiddleware, async (req, res) => {
 
     console.log("req has reached loopback ");
 
+    // these are the type checks that are require to make sure all the system is working fine 
     const findAmount = req.body.amount;
-    if (findAmount <= 0 || !isFinite(parseFloat(findAmount))) {
-      return res.status(400).json("The amount is negative broo");
+    if (
+      findAmount === null ||
+      findAmount === undefined ||
+      Array.isArray(findAmount) ||
+      typeof findAmount === "object" ||
+      typeof findAmount === "boolean" ||
+      (typeof findAmount === "string" && findAmount.trim() === "")
+    ) {
+      return res.status(400).json("Invalid amount format");
+    }
+
+    const numAmount = Number(findAmount);
+    if (!Number.isFinite(numAmount) || isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json("The amount is negative or invalid broo");
     }
     const queuedLoopbackResponse = await loopback({
       messageType: "ON_RAMP",

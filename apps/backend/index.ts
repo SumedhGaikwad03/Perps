@@ -415,10 +415,10 @@ export const app = express();
 
 app.use(express.json()); // attaches the req data to the json body 
 
-app.use("api/v1/" , authRouter);
-app.use("api/v1" , orderRouter);
-app.use("api/v1",marketRouter);
-app.use("api/v1",collateralRouter);
+app.use("/api/v1", authRouter);
+app.use("/api/v1", orderRouter);
+app.use("/api/v1", marketRouter);
+app.use("/api/v1", collateralRouter);
 
 const PORT = process.env.PORT || 3000 ;
 
