@@ -103,7 +103,14 @@ export type toEngine =  {
         side : orderSide,
 
 
-    } 
+    } | {
+
+        messageType : "OFF_RAMP"
+
+        userId: string ,
+        
+        amount : string ,
+    }
 
 
     export interface EngineStreamEntry { 
