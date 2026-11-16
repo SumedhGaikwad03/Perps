@@ -48,3 +48,47 @@ collateralRouter.post("/onRamp", authmiddleware, async (req, res) => {
     return res.status(500);
   }
 });
+
+collateralRouter.post("/offRamp",authmiddleware, async (req , res ) => {
+
+  try {
+// this is the function that is used to of load the balances of the user 
+
+// extarcting thr user id from the middle layers 
+const userId = req.userId!;
+
+const amount = req.body.amount.toString(); 
+
+// supposer we vaildated the req of the if the userid and amount are not the same 
+
+const queuedLoopBackResponse = await loopback({
+
+  messageType : "OFF_RAMP",
+  userId : userId,
+  amount : amount,
+}) ; 
+
+if(queuedLoopBackResponse){
+  console.log("yooooo you got the money right ? ");
+}
+
+return res.status(200).json({message: "the money is withdrawn broo" , result : queuedLoopBackResponse});
+
+  }catch(error){
+
+    console.log("Broo there has been an erroe as ",error);
+    return res.status(500).json({message: "Broo there has been an erroe as ",error});
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+}); 
