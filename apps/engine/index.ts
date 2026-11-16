@@ -6,6 +6,7 @@ import {
   isLineBreak,
   isTemplateMiddleOrTemplateTail,
 } from "typescript/unstable/ast";
+import { json } from "express";
 
 // we iniataire two instances that would read and publish the message for this stream
 const clientRead = createClient();
@@ -193,6 +194,15 @@ async function sweepLiquadations() {
         locked_bal : newLocked.toString()
       });
 
+      await publisher.xAdd("db-events", "*", {
+        eventType : "WALLET_UPDATE",
+        payload : JSON.stringify({
+          userId: pos.userId,
+          amountAvail : newAvail.toString(),
+          amountLocked : newLocked.toString(),
+         }),
+      });
+
 
 
 
@@ -332,11 +342,14 @@ async function fundingRate() {
       }
 
       let currentAvail = parseFloat(userBal.available_bal);
+      let currentLocked = parseFloat(userBal.locked_bal);
 
       if (!isPayer) {
         // if the current user is not the payer then we add the payment value to the player
         currentAvail += paymentValue;
       } else {
+        
+
         if (currentAvail >= paymentValue) {
           currentAvail -= paymentValue;
         }
@@ -352,17 +365,45 @@ async function fundingRate() {
           const currentMargin = parseFloat(pos.margin);
 
           if (currentMargin > shortfall) {
-            pos.margin = (currentMargin - shortfall).toString();
+
+            const newMargin = currentMargin - shortfall ; 
+            pos.margin = (newMargin).toString();
             // by reducing the margin we are actually increasing the users leverage and makeing the position more vulnerable to
             // the risk for liquation as  leverage = notional/margin
             // we updated the position here
+
+             currentLocked = Math.max(0,currentLocked-shortfall);
+
+
+            const newLeverage = (notinalValue / newMargin).toFixed(2);
+            pos.leverage = newLeverage;
             Positions.set(postionKey, pos);
+
+            await publisher.xAdd("db-events", "*",{
+              eventType : "POSITION_UPDATED",
+              payload : JSON.stringify({
+                userId : pos.userId,
+                marketId : pos.marketId,
+                size : pos.side === "LONG" ? pos.qty : `-${pos.qty}`,
+                entryPrice : pos.entryPrice,
+                leverage : Number(newLeverage),
+                liquidationPrice : null ,
+
+
+                          }),
+            });
           } else {
             // if even the marigin is not enough then its bad debt wee have to cover it form our side
 
             const badDebt = shortfall - currentMargin;
 
             pos.margin = "0";
+
+            currentLocked = Math.max(0,currentLocked-currentMargin);
+
+
+
+
 
             // we have to delete the postion
 
@@ -389,7 +430,7 @@ async function fundingRate() {
 
       Balances.set(pos.userId, {
         available_bal: currentAvail.toString(),
-        locked_bal: userBal.locked_bal,
+        locked_bal: currentLocked.toString(),
       });
 
       // time to persisit this data to the db
@@ -398,7 +439,7 @@ async function fundingRate() {
         payload: JSON.stringify({
           userId: pos.userId,
           amountAvail: currentAvail.toString(),
-          locked_bal: userBal.locked_bal,
+          amountLocked: currentLocked, 
         }),
       });
     }
