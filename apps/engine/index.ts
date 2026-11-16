@@ -114,6 +114,10 @@ const liquadation_intervals = 1000;
 const fundingRate_poller = 60 * 60 * 1000;
 
 // this is the function that is used for liqautating the orders
+// this is semi implented as the real issue lies in the adl and the fact that delevergaing the the opposite  side
+// that makes the other side of the user hold actual margin against something actually vauleable
+// we should never remove orders form the memory insted we should always submit an opposite order
+// to sqare off the the postion
 async function sweepLiquadations() {
   if (Positions.size === 0 || markPrices.size === 0) return;
 
@@ -148,6 +152,7 @@ async function sweepLiquadations() {
         ? (markPrice - entryPrice) * qty
         : (entryPrice - markPrice) * qty;
 
+        // this is a cusion for the user as this much amount can be backed by the user here 
     const equity = initialMargin + unRealaisedPnl;
 
     const maintainenceMargin = qty * markPrice * DefaultMrr;
@@ -165,8 +170,86 @@ async function sweepLiquadations() {
         mrr: maintainenceMargin,
         markPrice: rawPrice,
       });
+
+      // time to refund the user if this balces if he has any left with him 
+
+      const userBal = Balances.get(pos.userId) ?? {
+        available_bal: "0",
+        locked_bal : "0"
+      }; 
+
+      const currentAvail =parseFloat(userBal.available_bal);
+      const locked_bal = parseFloat(userBal.locked_bal); 
+
+
+      const newLocked = Math.max(0,locked_bal - initialMargin);
+      
+      const refundAmount = Math.max(0,equity);
+
+      const newAvail = refundAmount+currentAvail;
+
+      Balances.set(pos.userId, {
+        available_bal: newAvail.toString(),
+        locked_bal : newLocked.toString()
+      });
+
+
+
+
+
+      
       // we have make it real time so we have to backend or engine
 
+      // time to clear all the orders form the book for this user
+
+      // this clears the postion form the in memory array
+      
+      // we have to clear the order book for the user for any resting pos or fields that he may have
+
+      for (const [priceKey, level] of book.bids.entries()) {
+        // we start to traverse the order book , find how may orders exists at that price level
+        const intialOrderCount = level.orders.length;
+        // find how may orders are not equal to the surrent user id , actually the orders are deleted here
+        level.orders = level.orders.filter((o) => o.userId !== pos.userId);
+
+        if (level.orders.length !== intialOrderCount) {
+          // loop executing here is proff that there are some orders that belong to the user here
+          if (level.orders.length === 0) {
+            // as if there are no orders apart form the user orders then its a waste of time
+            book.bids.delete(priceKey);
+          } else {
+            level.totalQty = level.orders
+              .reduce(
+                (sum, o) => sum + (parseFloat(o.qty) - parseFloat(o.filledQty)),
+                0,
+              )
+              .toString();
+          }
+        }
+
+        // we have now cleared all the bids in the order book
+      }
+      // for  the time for asks now
+      for (const [priceKey, level] of book.asks.entries()) {
+        const intialOrderCount = level.orders.length;
+        // clearing the order for the users that are not here
+        level.orders = level.orders.filter((o) => o.userId !== pos.userId);
+
+        if (level.orders.length !== intialOrderCount) {
+          if (level.orders.length === 0) {
+            book.asks.delete(priceKey);
+          }else {
+          level.totalQty = level.orders
+            .reduce(
+              (sum, o) => sum + (parseFloat(o.qty) - parseFloat(o.filledQty)),
+              0,
+            )
+            .toString();
+        }
+        } 
+      }
+
+      // this removes it form the db events
       await publisher.xAdd("db-events", "*", {
         eventType: "POSITION_LIQUIDATED",
         payload: JSON.stringify({
@@ -183,6 +266,8 @@ async function sweepLiquadations() {
 }
 
 // this is the funtion is used for funding rate
+// this is incomplete as the funds needs to transfered in the correct propostion in the system
+// all the other cautions are happening roughtly here
 async function fundingRate() {
   // iterata over all the insalised prices in the market
 
@@ -321,6 +406,7 @@ async function fundingRate() {
 }
 
 // this is used for normalsising the binace incoming tokens
+// this is for the use of users when they have to create new token for them selves
 function RegisterBinanceFeed(binanceIncoming: string, baseToken: BaseToken) {
   BINANCE_FEED_MAP[binanceIncoming.toLowerCase()] = baseToken;
 }
@@ -630,6 +716,9 @@ function startBinanceWebSocket() {
           `  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`,
         );
         console.log(
+          `The current markPrices is as follows :  ${markPrices.get(baseToken)}`,
+        );
+        console.log(
           `---------------------------------------------------------------------------------------------------------------`,
         );
       }
@@ -670,7 +759,7 @@ function startFundingRatePoller() {
 }
 startFundingRatePoller();
 startLiquidationPoller();
-//startBinanceWebSocket();
+startBinanceWebSocket();
 
 console.log("all the backgrouund daemons are now working here ");
 
@@ -680,8 +769,8 @@ async function executeMatchingFunction(
   streamEntryId: string,
 ) {
   // THE EXTRACT KEY WORD is used to narrow down the union types in the in the commons
-  // this matching function is used by two of the endpoints in the system that makes this an common way 
-  // for order to execute 
+  // this matching function is used by two of the endpoints in the system that makes this an common way
+  // for order to execute
 
   // now lets start to implemtn the logic in this function
   const { userId, marketId, side, qty, price, orderType, leverage, orderId } =
@@ -1498,7 +1587,7 @@ while (true) {
 
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, entry.id);
       continue;
-     }
+    }
 
     if (command.messageType == "CREATE_MARKET") {
       // to calauate the markprice the mark prices should only be created on top of existince market places

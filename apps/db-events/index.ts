@@ -14,7 +14,7 @@ const redis = createClient();
 
 const STREAM_KEY = "db-events";
 const CONSUMER_GROUP = "db-consumer-group";
-const CONSUMER_NAME = "db-worker-1";
+const WORKER_NAME = "db-worker-1";
 
 // all the variables are set here as of now
 // tem to create an engine group here
@@ -45,7 +45,7 @@ async function startWorker() {
     try {
       const response = await redis.xReadGroup(
         CONSUMER_GROUP,
-        CONSUMER_NAME,
+        WORKER_NAME,
         [
           {
             key: STREAM_KEY,
@@ -53,8 +53,8 @@ async function startWorker() {
           },
         ],
         {
-          BLOCK: 2000,
-          COUNT: 20,
+          BLOCK: 2000, // this makes the worker work at every 2 sec so it does not waste cycles 
+          COUNT: 20, // pulls 20 messages at once so that network flow is optimal here 
         },
       );
 
@@ -65,6 +65,7 @@ async function startWorker() {
       const StreamEntries = response[0].messages;
 
       // now we iterate over the entries that we have just received
+      // we have rece
       for (const entry of StreamEntries) {
         const eventType = entry.message.eventType as string;
         const payloadString = entry.message.payload as string;
@@ -112,6 +113,50 @@ async function startWorker() {
 // time to implement the event handlers in the the db group
 
 //1. this is the trade executed for the event handler
+
+async function processEvent(eventType: string, rawPayload: string) {
+  const payload = JSON.parse(rawPayload);
+
+  switch (eventType) {
+    case "TRADE_EXECUTED":
+      await handelTradeExecuted(payload as Payloads.TradeExecutedPayload);
+      break;
+
+    case "ORDER_CANCELLED":
+      await handelOrderCancelled(payload as Payloads.OrderCancelledPayload);
+      break;
+
+    case "POSITION_LIQUIDATED":
+      await handelPositionLiquadated(
+        payload as Payloads.PositionLiquidatedPayload,
+      );
+      break;
+
+    case "POSITION_UPDATED":
+      await handelPositionUpdated(payload as Payloads.PositionUpdatePayload);
+      break;   
+
+    case "POSITION_BANKRUPT":
+      await handelPositionBankrupt(payload as Payloads.PositionBankruptPayload);
+      break;
+
+    case "MARKET_CREATED":
+      await handelMarketCreated(payload as Payloads.MarketCreatedPayload);
+      break;
+
+    case "ORDER_ACCEPTED":
+      await handelOrderAccepted(payload as Payloads.OrderAcceptedPayload);
+      break;
+
+    case "WALLET_UPDATE":
+      await handelWalletUpdate(payload as Payloads.WalletTransactionPayload);
+      break;
+
+    default:
+      console.warn(`[db-worker], this event ${eventType} is not supported`);
+  }
+} 
+// this is the function that we have defined for the system here 
 
 async function handelTradeExecuted(payload: Payloads.TradeExecutedPayload) {
   const { takerOrderId, takerUserId, marketId, fills } = payload;
@@ -203,7 +248,6 @@ async function handelTradeExecuted(payload: Payloads.TradeExecutedPayload) {
 }
 
 // this is handel the accepted order
-
 async function handelOrderAccepted(payload: Payloads.OrderAcceptedPayload) {
   const {
     userId,
@@ -359,48 +403,7 @@ async function handelMarketCreated(payload: Payloads.MarketCreatedPayload) {
   });
 }
 
-async function processEvent(eventType: string, rawPayload: string) {
-  const payload = JSON.parse(rawPayload);
 
-  switch (eventType) {
-    case "TRADE_EXECUTED":
-      await handelTradeExecuted(payload as Payloads.TradeExecutedPayload);
-      break;
-
-    case "ORDER_CANCELLED":
-      await handelOrderCancelled(payload as Payloads.OrderCancelledPayload);
-      break;
-
-    case "POSITION_LIQUIDATED":
-      await handelPositionLiquadated(
-        payload as Payloads.PositionLiquidatedPayload,
-      );
-      break;
-
-    case "POSITION_UPDATED":
-      await handelPositionUpdated(payload as Payloads.PositionUpdatePayload);
-      break;   
-
-    case "POSITION_BANKRUPT":
-      await handelPositionBankrupt(payload as Payloads.PositionBankruptPayload);
-      break;
-
-    case "MARKET_CREATED":
-      await handelMarketCreated(payload as Payloads.MarketCreatedPayload);
-      break;
-
-    case "ORDER_ACCEPTED":
-      await handelOrderAccepted(payload as Payloads.OrderAcceptedPayload);
-      break;
-
-    case "WALLET_UPDATE":
-      await handelWalletUpdate(payload as Payloads.WalletTransactionPayload);
-      break;
-
-    default:
-      console.warn(`[db-worker], this event ${eventType} is not supported`);
-  }
-}
 
 async function handelWalletUpdate(payload: Payloads.WalletTransactionPayload) {
   //destructing the payload here
