@@ -200,8 +200,8 @@ orderRouter.post(`/exitPosition`, authmiddleware, async (req: any, res) => {
     const userId = req.userId;
     const { marketId, qty } = req.body;
 
-    if (!marketId || !qty) {
-      return res.status(403).json({ message: " The market does not exists bro or the qty is invaild " });
+    if (!marketId ) {
+      return res.status(403).json({ message: " The market does not exists bro  " });
     }
 
     if (!Number(qty)) {

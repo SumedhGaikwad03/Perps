@@ -31,6 +31,7 @@ export async function executeMatchingFunction(
   const userLeverage = parseFloat(leverage);
 
   if (!book) {
+    // we here are essentially returing a string that resolves to a promise 
     return "book not found broo";
   }
 
@@ -98,7 +99,7 @@ export async function executeMatchingFunction(
     }
 
     // even at this point the availble qty is not enough to make the order
-    // worth it
+    // worth it to take this order now 
     if (available_qty < numQty) {
       // TO MAKE THE TAKER GET BACK HIS COLLATERAL AS
 

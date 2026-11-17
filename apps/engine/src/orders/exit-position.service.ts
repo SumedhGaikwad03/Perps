@@ -2,6 +2,7 @@ import type { toEngine } from "common";
 import { STREAM_KEY, ENGINE_GROUP } from "../config";
 import { getOrderBook, getPosition } from "../state";
 import { publisher } from "../streams/publisher";
+import { executeMatchingFunction } from "../matching-engine";
 
 export async function handleExitPosition(
   command: Extract<toEngine, { messageType: "EXIT_POSITION" }>,
@@ -32,12 +33,12 @@ export async function handleExitPosition(
       const posKey = `${userId}:${marketId}`;
       const Position = getPosition(posKey);
 
-      if (!Position) {
+      if (!Position || parseFloat(Position.qty) <= 0){
         await publisher.xAdd("to-backend", "*", {
           loopbackId,
           status: "REJECTED",
           data: "",
-          error: "MARKET_NOT_FOUND_BRO",
+          error: "YOUR_POSITION_IN_MARKET_NOT_FOUND_BRO",
         });
 
         await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, streamEntryId);
@@ -66,18 +67,18 @@ export async function handleExitPosition(
         price: undefined,
         leverage: Position.leverage || "1",
         reduceOnly: true,
-        timeInForce: "IOC",
-        orderType: "LIMIT",
+        timeInForce: "IOC", // all the qty that remains will be handeld by the insurence fund of the engine 
+        orderType: "MARKET", // we always exit at the market right bro ? 
       };
       // the dummy order is now created we have to pass this order to the matchiing engine now
 
-      await publisher.xAdd("to-backend", "*", {
-        loopbackId,
-        status: "REJECTED",
-        data: "",
-        error: "EXIT_POSITION_NOT_SUPPORTED_USE_REDUCE_ONLY_ORDER",
-      });
 
-      await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, streamEntryId);
+      await executeMatchingFunction(DummyOrder , loopbackId , streamEntryId);
+
+ // now everthing is handeled by the engine 
+    
+       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, streamEntryId);
       return;
-}
+    }
+
+    
