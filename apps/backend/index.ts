@@ -1,9 +1,9 @@
 import express from "express";
 
-import { authRouter } from "./routes/auth.routes";
-import { orderRouter } from "./routes/order.routes";
-import { marketRouter } from "./routes/market.routes";
-import { collateralRouter } from "./routes/collateral.routes";
+import { authRouter } from "./coreRoutes/auth.routes";
+import { orderRouter } from "./coreRoutes/order.routes";
+import { marketRouter } from "./coreRoutes/market.routes";
+import { collateralRouter } from "./coreRoutes/collateral.routes";
 
 export const app = express();
 
