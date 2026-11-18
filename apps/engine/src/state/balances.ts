@@ -1,8 +1,24 @@
 import type { UserBalance } from "../types";
+import { publisher } from "../streams/publisher";
 
 // Master register for balances to keep all the balances for the users
 const Balances: Map<string, UserBalance> = new Map();
 
+
+// this is the new endpoint to make the balces mirror the actual balences as
+
+export function mirrorBalancesToRedis(userId : string , balance : UserBalance){
+ if(!publisher.isOpen){
+
+  return ;
+ }
+ publisher.hSet(`user:${userId}:balance`, `data`, JSON.stringify(balance))
+ .catch((error)=> {
+   console.log("redis mirror failed to get the balances for this user ", userId , "becasue of this err", error);
+
+ });
+
+}
 /**
  * Returns the user's balance if present in the state map, or undefined if the user has no balance record.
  * Does NOT instantiate a default record.
@@ -24,6 +40,10 @@ export function getOrCreateBalance(userId: string): UserBalance {
       locked_bal: "0",
     };
     Balances.set(userId, bal);
+
+     
+   // creating an hash state to build up the in memory array in the engine 
+  mirrorBalancesToRedis(userId, bal);
   }
   return bal;
 }
@@ -36,6 +56,9 @@ export function setBalance(userId: string, balance: UserBalance): void {
     available_bal: balance.available_bal,
     locked_bal: balance.locked_bal,
   });
+  const newBal = {available_bal : balance.available_bal , locked_bal : balance.locked_bal}
+
+  mirrorBalancesToRedis(userId, newBal);
 }
 
 /**

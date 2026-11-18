@@ -1,8 +1,45 @@
+import { json } from "express";
+import { publisher } from "../streams";
 import type { Position } from "../types";
 
 // Master map for all the positions that exist in the engine (key: userId:marketId)
 const Positions: Map<string, Position> = new Map();
 
+
+
+// this function below is used to mirror positions to redis 
+
+export function mirrorPositionsToRedis( position : Position) {
+  // add the full pos to the market 
+
+  if(!publisher.isOpen){
+
+    return ;
+  }
+  publisher.hSet(`user:${position.userId}positions` , position.marketId, JSON.stringify(position));
+}
+
+// this is the function to remove the mirror postions 
+
+
+export function deleteMirroredPosition(posKey : string){
+  // we only send poskey as an user can hold many postion as 
+  // user123:btc , we can delte this just by this key 
+
+  if(!publisher.isOpen){
+    return;
+  }
+  const [userId , marketId] = posKey.split(":");
+
+  if(!userId || !marketId){
+    return 
+  }
+
+  publisher.hDel(`user:${userId}:position`,marketId)
+  .catch((error)=> {
+    console.log(`There was a error in the file broo for the user and clearng his pos${userId} and {} `)
+  })
+}
 /**
  * Standard composite key generator for positions: `${userId}:${marketId}`.
  */
@@ -32,6 +69,7 @@ export function getPositionByUserMarket(
  */
 export function setPosition(posKey: string, position: Position): void {
   Positions.set(posKey, position);
+  mirrorPositionsToRedis(position);
 }
 
 /**
@@ -39,6 +77,8 @@ export function setPosition(posKey: string, position: Position): void {
  */
 export function deletePosition(posKey: string): boolean {
   return Positions.delete(posKey);
+  deleteMirroredPosition(posKey);
+  
 }
 
 /**
