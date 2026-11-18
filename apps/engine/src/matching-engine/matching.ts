@@ -1,10 +1,12 @@
-import type { toEngine } from "common";
+import type { OrderAcceptedPayload, toEngine } from "common";
 import {
   getOrderBook,
   getOrCreateBalance,
   setBalance,
   getBalance,
   getPosition,
+  MirrorOpenOrder,
+  DeleteMirrordOpenOrder,
 } from "../state";
 import { publisher } from "../streams/publisher";
 import { updatePositionFills } from "../positions";
@@ -228,6 +230,7 @@ export async function executeMatchingFunction(
       ) {
         // this removes the order at index 0 and slides every other order by one position
         priceLevel?.orders.shift();
+        DeleteMirrordOpenOrder(restingOrder!.userId, restingOrder!.originalOrderId);
       }
 
       // if all the oders at the order book are eaten then we delete that price level
@@ -283,6 +286,8 @@ export async function executeMatchingFunction(
           available_bal: makerBal.available_bal,
           locked_bal: updatedLockedBalance.toString(),
         });
+
+       
 
         await publisher.xAdd("db-events", "*", {
           eventType: "WALLET_UPDATE",
@@ -372,6 +377,7 @@ export async function executeMatchingFunction(
 
   if (remaningQty <= 0) {
     finalStatus = "FILLED";
+     DeleteMirrordOpenOrder(userId,orderId);
     //return ;
   } else {
     //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
@@ -415,6 +421,7 @@ export async function executeMatchingFunction(
         reduceOnly: Boolean(command.reduceOnly),
       });
 
+      // now we have to mirror the open order in the 
       //updating the depth of the order for that level
       level.totalQty = (parseFloat(level.totalQty) + remaningQty).toString();
     } else {
@@ -502,9 +509,9 @@ export async function executeMatchingFunction(
     ? 0
     : (numQty * numPrice) / userLeverage;
 
-  await publisher.xAdd("db-events", "*", {
-    eventType: "ORDER_ACCEPTED",
-    payload: JSON.stringify({
+
+  const OrderAcceptedPayload : OrderAcceptedPayload = {
+        
       orderId,
       marketId,
       userId,
@@ -516,8 +523,19 @@ export async function executeMatchingFunction(
       reduceOnly: Boolean(command.reduceOnly),
       initialMargin: initialMargin.toString(),
       lockedMargin: remainingOrderMargin.toString(),
-    }),
+
+
+  } 
+  // this is done is 
+
+  await publisher.xAdd("db-events", "*", {
+    eventType: "ORDER_ACCEPTED",
+    payload: JSON.stringify(OrderAcceptedPayload),
   });
+
+  if (orderType === "LIMIT" && remaningQty > 0) {
+    MirrorOpenOrder(OrderAcceptedPayload);
+  }
 
   await publisher.xAdd("db-events", "*", {
     eventType: "TRADE_EXECUTED",

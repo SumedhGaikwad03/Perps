@@ -12,7 +12,7 @@ export function mirrorBalancesToRedis(userId : string , balance : UserBalance){
 
   return ;
  }
- publisher.hSet(`user:${userId}:balance`, `data`, JSON.stringify(balance))
+ publisher.hSet(`user:${userId}:balances`, `data`, JSON.stringify(balance))
  .catch((error)=> {
    console.log("redis mirror failed to get the balances for this user ", userId , "becasue of this err", error);
 
@@ -69,10 +69,12 @@ export function updateBalance(
   available_bal: string,
   locked_bal: string,
 ): void {
-  Balances.set(userId, {
+  const newBal = {
     available_bal,
     locked_bal,
-  });
+  };
+  Balances.set(userId, newBal);
+  mirrorBalancesToRedis(userId, newBal);
 }
 
 /**

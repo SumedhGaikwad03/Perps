@@ -3,6 +3,7 @@ import type { OpenOrder } from "../types";
 import { STREAM_KEY, ENGINE_GROUP } from "../config";
 import { getOrderBook, getOrCreateBalance, setBalance } from "../state";
 import { publisher } from "../streams/publisher";
+import { DeleteMirrordOpenOrder } from "../state";
 
 
 // this endpoint only work for the orders that are still resting on the book not being matched here 
@@ -114,6 +115,7 @@ export async function handleCancelOrder(
 
             // time to remove the order now
 
+             DeleteMirrordOpenOrder(userId,orderId);
             foundOrder = level.orders.splice(idx, 1)[0]!;
 
             // update the quanty at the level
@@ -193,6 +195,7 @@ export async function handleCancelOrder(
 
             // time to remove the order now
 
+            DeleteMirrordOpenOrder(userId, orderId);
             foundOrder = level.orders.splice(idx, 1)[0]!;
 
             // update the quanty at the level

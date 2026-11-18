@@ -254,7 +254,7 @@ export interface OrderResult {
     marketId : string ;
 
     orderType : OrderType;
-    orderSide : orderSide ;
+    orderSide : orderSide;
 
     price : string | null ;
     qty : string ;
@@ -291,6 +291,21 @@ export interface MatchingResponse {
 
 
 }
+
+// this is used to create an open order in the market 
+export interface MirrorOpenOrder {
+
+    orderId : string ,
+    userId : string ,
+    marketId : string ,
+    price : string ,
+    qty : string ,
+    filledQty : string ,
+    orderSide : orderSide,
+    orderType : OrderType,
+    reduceOnly : boolean
+
+} 
 
 
 

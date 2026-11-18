@@ -1,5 +1,7 @@
 import type { OrderBook } from "../types";
 import { DEFAULT_BASE_TOKEN_MAP } from "../config";
+import type  { OrderAcceptedPayload } from "common";
+import { publisher } from "../streams/publisher";
 
 // Master register that keeps all the order books in the engine
 const orderBooks = new Map<string, OrderBook>();
@@ -89,4 +91,28 @@ export function clearOrderBooks(): void {
   for (const [token, markets] of Object.entries(DEFAULT_BASE_TOKEN_MAP)) {
     baseTokenToMarkets.set(token, [...markets]);
   }
+}
+
+// this is the function that would mirror open order back to the 
+
+export function MirrorOpenOrder(order : OrderAcceptedPayload) : void {
+  
+if(!publisher.isOpen){
+  return;
+} 
+// we are naming this field as with the data as order.orderId as a single user can have many orders 
+publisher.hSet(`user:${order.userId}:open_orders`, order.orderId , JSON.stringify(order))
+.catch((err)=> console.log("THERE HAS BEEN AN ERROR BROOO..")); 
+
+
+}
+
+export function DeleteMirrordOpenOrder(userId : string , orderId : string ){
+
+  if(!publisher.isOpen){
+
+    return 
+  }
+  publisher.hDel(`user:${userId}:open_orders`, orderId ) 
+  .catch((err)=> console.log("THERE HAS BEEN ERROR AS", err));
 }

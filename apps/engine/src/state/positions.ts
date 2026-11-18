@@ -1,4 +1,3 @@
-import { json } from "express";
 import { publisher } from "../streams";
 import type { Position } from "../types";
 
@@ -16,7 +15,11 @@ export function mirrorPositionsToRedis( position : Position) {
 
     return ;
   }
-  publisher.hSet(`user:${position.userId}positions` , position.marketId, JSON.stringify(position));
+  publisher
+    .hSet(`user:${position.userId}:positions`, position.marketId, JSON.stringify(position))
+    .catch((error) => {
+      console.log(`Failed to mirror position for user ${position.userId}:`, error);
+    });
 }
 
 // this is the function to remove the mirror postions 
@@ -35,10 +38,11 @@ export function deleteMirroredPosition(posKey : string){
     return 
   }
 
-  publisher.hDel(`user:${userId}:position`,marketId)
-  .catch((error)=> {
-    console.log(`There was a error in the file broo for the user and clearng his pos${userId} and {} `)
-  })
+  publisher
+    .hDel(`user:${userId}:positions`, marketId)
+    .catch((error)=> {
+      console.log(`There was a error in the file broo for the user and clearng his pos${userId} and {} `)
+    })
 }
 /**
  * Standard composite key generator for positions: `${userId}:${marketId}`.
@@ -69,6 +73,7 @@ export function getPositionByUserMarket(
  */
 export function setPosition(posKey: string, position: Position): void {
   Positions.set(posKey, position);
+  // this is done for the sake of the frontend dashboard 
   mirrorPositionsToRedis(position);
 }
 
@@ -76,8 +81,9 @@ export function setPosition(posKey: string, position: Position): void {
  * Deletes a position from memory under the given composite key.
  */
 export function deletePosition(posKey: string): boolean {
+   deleteMirroredPosition(posKey);
   return Positions.delete(posKey);
-  deleteMirroredPosition(posKey);
+
   
 }
 
@@ -92,7 +98,7 @@ export function hasPosition(posKey: string): boolean {
  * Returns the total count of active positions in memory.
  */
 export function getPositionsCount(): number {
-  return Positions.size;
+  return Positions.size; 
 }
 
 /**
@@ -100,7 +106,7 @@ export function getPositionsCount(): number {
  * to preserve Phase 1 compatibility. Will be replaced by immutable snapshots in future phases.
  */
 export function getAllPositions(): IterableIterator<[string, Position]> {
-  return Positions.entries();
+  return Positions.entries(); 
 }
 
 /**
