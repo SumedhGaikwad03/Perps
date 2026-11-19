@@ -25,7 +25,7 @@ for(const m of markets){
 
     addMarketToBaseToken(m.baseToken,m.id);
 
-    // fetch the last executed trade price if available
+    // time to fetch the last executed trade price if it exists
     const lastFill = await prisma.fill.findFirst({
       where: { marketId: m.id },
       orderBy: { createdAt: "desc" },

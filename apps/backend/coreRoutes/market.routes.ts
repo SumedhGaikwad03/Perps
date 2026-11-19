@@ -13,10 +13,9 @@ redisClient.connect().catch((err) => {
   console.error("Redis connection error in market.routes:", err);
 });
 
-/**
- * GET /api/v1/market/depth
- * Fetches real-time L2 orderbook snapshot (bids & asks) from Redis mirror
- */
+// this endpoint will fetch the depth of the orderbook directly from redis 
+// so that we dont hit the matching engine stream and cause delay for the trades
+
 marketRouter.get("/market/depth", async (req, res) => {
   try {
     const marketId = (req.query.marketId as string) || (req.query.id as string);
@@ -24,6 +23,7 @@ marketRouter.get("/market/depth", async (req, res) => {
 
     let targetMarketId = marketId;
 
+    // if user passed symbol insted of market id we find the market id first
     if (!targetMarketId && symbol) {
       const market = await prisma.market.findUnique({
         where: { symbol },
@@ -42,6 +42,7 @@ marketRouter.get("/market/depth", async (req, res) => {
       });
     }
 
+    // time to fetch the depth data form redis in memory mirror
     const rawDepth = await redisClient.hGet(`market:${targetMarketId}:depth`, "data");
 
     if (!rawDepth) {
@@ -71,10 +72,8 @@ marketRouter.get("/market/depth", async (req, res) => {
   }
 });
 
-/**
- * GET /api/v1/markets
- * Returns all active markets with 24h stats and latest prices
- */
+// this endpoint pulls all the markets that are active with 24h volume and stats for the frontend
+
 marketRouter.get("/markets", async (_req, res) => {
   try {
     const markets = await prisma.market.findMany({
@@ -85,10 +84,12 @@ marketRouter.get("/markets", async (_req, res) => {
 
     const marketsData = await Promise.all(
       markets.map(async (m) => {
+        // get the live last traded price form redis depth snapshot
         const rawDepth = await redisClient.hGet(`market:${m.id}:depth`, "data");
         const depth = rawDepth ? JSON.parse(rawDepth) : null;
         const lastTradedPrice = depth ? depth.lastTradedPrice : "0";
 
+        // we fetch the 24 hour fills from the db to calculate volume and high low
         const fills24h = await prisma.fill.findMany({
           where: {
             marketId: m.id,
