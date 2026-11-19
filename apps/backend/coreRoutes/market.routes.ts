@@ -1,5 +1,5 @@
 import { Router } from "express";
-
+import { createClient } from "redis";
 import { prisma } from "db";
 
 import { adminMiddleWare } from "../middleWare/authMiddleware";
@@ -7,6 +7,140 @@ import { adminMiddleWare } from "../middleWare/authMiddleware";
 import { loopback } from "../loopback";
 
 export const marketRouter = Router();
+
+const redisClient = createClient();
+redisClient.connect().catch((err) => {
+  console.error("Redis connection error in market.routes:", err);
+});
+
+/**
+ * GET /api/v1/market/depth
+ * Fetches real-time L2 orderbook snapshot (bids & asks) from Redis mirror
+ */
+marketRouter.get("/market/depth", async (req, res) => {
+  try {
+    const marketId = (req.query.marketId as string) || (req.query.id as string);
+    const symbol = req.query.symbol as string;
+
+    let targetMarketId = marketId;
+
+    if (!targetMarketId && symbol) {
+      const market = await prisma.market.findUnique({
+        where: { symbol },
+        select: { id: true },
+      });
+      if (!market) {
+        return res.status(404).json({ success: false, message: "Market not found" });
+      }
+      targetMarketId = market.id;
+    }
+
+    if (!targetMarketId) {
+      return res.status(400).json({
+        success: false,
+        message: "marketId or symbol is required",
+      });
+    }
+
+    const rawDepth = await redisClient.hGet(`market:${targetMarketId}:depth`, "data");
+
+    if (!rawDepth) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          marketId: targetMarketId,
+          bids: [],
+          asks: [],
+          lastTradedPrice: "0",
+          timestamp: Date.now(),
+        },
+      });
+    }
+
+    const depth = JSON.parse(rawDepth);
+    return res.status(200).json({
+      success: true,
+      data: depth,
+    });
+  } catch (error) {
+    console.error("Error in /market/depth:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error fetching orderbook depth",
+    });
+  }
+});
+
+/**
+ * GET /api/v1/markets
+ * Returns all active markets with 24h stats and latest prices
+ */
+marketRouter.get("/markets", async (_req, res) => {
+  try {
+    const markets = await prisma.market.findMany({
+      orderBy: { symbol: "asc" },
+    });
+
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const marketsData = await Promise.all(
+      markets.map(async (m) => {
+        const rawDepth = await redisClient.hGet(`market:${m.id}:depth`, "data");
+        const depth = rawDepth ? JSON.parse(rawDepth) : null;
+        const lastTradedPrice = depth ? depth.lastTradedPrice : "0";
+
+        const fills24h = await prisma.fill.findMany({
+          where: {
+            marketId: m.id,
+            createdAt: { gte: oneDayAgo },
+          },
+          select: { price: true, qty: true },
+        });
+
+        let volume24h = 0;
+        let high24h = parseFloat(lastTradedPrice) || 0;
+        let low24h = parseFloat(lastTradedPrice) || 0;
+
+        if (fills24h.length > 0) {
+          high24h = -Infinity;
+          low24h = Infinity;
+          for (const fill of fills24h) {
+            const p = parseFloat(fill.price);
+            const q = parseFloat(fill.qty);
+            volume24h += p * q;
+            if (p > high24h) high24h = p;
+            if (p < low24h) low24h = p;
+          }
+        }
+
+        return {
+          id: m.id,
+          symbol: m.symbol,
+          slug: m.slug,
+          baseToken: m.baseToken,
+          tickSize: m.tickSize,
+          stepSize: m.stepSize,
+          imgUrl: m.imgUrl,
+          lastTradedPrice,
+          high24h: high24h === -Infinity ? lastTradedPrice : high24h.toString(),
+          low24h: low24h === Infinity ? lastTradedPrice : low24h.toString(),
+          volume24h: volume24h.toFixed(2),
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: marketsData,
+    });
+  } catch (error) {
+    console.error("Error in /markets:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error fetching markets",
+    });
+  }
+});
 
 
 marketRouter.post("/admin/market", adminMiddleWare, async (req, res) => {

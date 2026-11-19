@@ -7,6 +7,7 @@ import {
   getPosition,
   MirrorOpenOrder,
   DeleteMirrordOpenOrder,
+  mirrorOrderBookDepth,
 } from "../state";
 import { publisher } from "../streams/publisher";
 import { updatePositionFills } from "../positions";
@@ -546,7 +547,7 @@ export async function executeMatchingFunction(
       fills,
     }),
   });
-
+mirrorOrderBookDepth(marketId);
   await publisher.xAdd("to-backend", "*", {
     loopbackId,
     status: "SUCCESS",

@@ -1,7 +1,7 @@
 import type { toEngine } from "common";
 import type { OpenOrder } from "../types";
 import { STREAM_KEY, ENGINE_GROUP } from "../config";
-import { getOrderBook, getOrCreateBalance, setBalance } from "../state";
+import { getOrderBook, getOrCreateBalance, setBalance, mirrorOrderBookDepth } from "../state";
 import { publisher } from "../streams/publisher";
 import { DeleteMirrordOpenOrder } from "../state";
 
@@ -237,6 +237,8 @@ export async function handleCancelOrder(
         }),
       });
       // all is now set what is left is to notify the backend what is hapning
+
+      mirrorOrderBookDepth(marketId);
 
       await publisher.xAdd("to-backend", "*", {
         loopbackId,

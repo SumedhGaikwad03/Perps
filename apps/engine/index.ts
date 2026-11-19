@@ -3,6 +3,7 @@ import { STREAM_KEY, ENGINE_GROUP } from "./src/config";
 import { startBinanceWebSocket } from "./src/market-data";
 import { startFundingRatePoller, startLiquidationPoller } from "./src/risk";
 import { startEngineConsumer, publisher } from "./src/streams";
+import { bootstrapEngine } from "./src/bootstrap/hydrate";
 
 export { SUPPORTED_BASE_TOKEN, type BaseToken } from "./src/types";
 
@@ -20,6 +21,10 @@ try {
     throw error;
   }
 }
+
+// at this point hopefully redis is connected now 
+
+await bootstrapEngine(); 
 
 console.log("engine has started");
 

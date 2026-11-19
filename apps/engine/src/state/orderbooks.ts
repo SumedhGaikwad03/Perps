@@ -11,6 +11,60 @@ const baseTokenToMarkets = new Map<string, string[]>(
   Object.entries(DEFAULT_BASE_TOKEN_MAP),
 );
 
+
+// this is now time to write the function that mirrors the orderbook in the engine 
+
+export function  mirrorOrderBookDepth(marketId : string , depth = 50): void {
+
+if(!publisher.isOpen){
+  return;
+}
+
+const book = orderBooks.get(marketId);
+
+if(!book) return ;
+
+// we have the orderbook now 
+
+const bids : [string , string] [] = Array.from(book.bids.entries())
+// this line gives the total qutanty for that level now 
+ .map(([price , level]) => [price , level.totalQty] as [string,string]) 
+ //we have to remove the first level of the price level 
+ .filter(([_ , qty]) => parseFloat(qty)>0)
+ .sort((a,b)=> parseFloat(b[0]) - parseFloat(a[0]))
+ .slice(0,depth);
+
+
+ const asks : [string ,string][] = Array.from(book.asks.entries())
+ // this will return a new array in the engine 
+ .map(([price , level])=> [price ,level.totalQty] as [string,string])
+ .filter(([_,qty])=> parseFloat(qty)>0)
+ // sort the list in desc now 
+ .sort((a,b)=> parseFloat(a[0])- parseFloat(b[0]))
+ // now to splice it 
+ .slice(0,depth);
+
+// now we have a depth snapshot for the same here 
+
+const depthSnapshot={
+  marketId,
+  symbol : book.symbol,
+  lastTradedPrice : book.lastTradedPrice.toString(),
+  bids,
+  asks,
+  timestamp : Date.now()
+};
+
+// now we have to publish that hash in the system right 
+
+publisher.hSet(`market:${marketId}:depth`,"data", JSON.stringify(depthSnapshot))
+.catch((error)=> {
+console.error("There was an error in making the snahot for the engine possible as", error);
+});
+
+
+
+}
 /**
  * Retrieves the OrderBook for a specific marketId. Returns undefined if not found.
  * Returns the direct OrderBook reference to preserve existing bids/asks Map operations.
@@ -111,7 +165,7 @@ export function DeleteMirrordOpenOrder(userId : string , orderId : string ){
 
   if(!publisher.isOpen){
 
-    return 
+    return ;
   }
   publisher.hDel(`user:${userId}:open_orders`, orderId ) 
   .catch((err)=> console.log("THERE HAS BEEN ERROR AS", err));

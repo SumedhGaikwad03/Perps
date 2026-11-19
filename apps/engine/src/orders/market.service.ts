@@ -7,6 +7,7 @@ import {
   isBaseTokenSupported,
   addMarketToBaseToken,
   getMarkPrice,
+  mirrorOrderBookDepth,
 } from "../state";
 import { publisher } from "../streams/publisher";
 
@@ -95,6 +96,7 @@ export async function handleCreateMarket(
       console.log("orderBook has been created for the market ");
       // the orderbook has been created for the
 
+      mirrorOrderBookDepth(marketId);
       await publisher.xAdd("to-backend", "*", {
         loopbackId,
         status: "SUCCESS",

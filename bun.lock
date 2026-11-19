@@ -74,6 +74,7 @@
     "apps/engine": {
       "name": "engine",
       "dependencies": {
+        "db": "workspace:*",
         "redis": "^6.3.0",
         "ws": "^8.22.1",
       },
