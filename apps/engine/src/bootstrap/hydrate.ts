@@ -12,7 +12,7 @@ import type { OrderBook, Position, PriceLevel } from "../types";
 import type { OrderAcceptedPayload } from "common";
 
 export async function bootstrapEngine(): Promise<void> {
-  console.log("[Engine Bootstrap] Starting state hydration from PostgreSQL...");
+  console.log("[Engine Bootstrap] Starting state hydration from PostgreSQL");
 
 
 // this file is basiicly there for the when the engine fails and then we have bring back the engine to

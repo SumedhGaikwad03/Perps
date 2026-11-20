@@ -67,6 +67,7 @@ export function registerBinanceFeed(
  * Resolves an incoming Binance stream symbol to the corresponding engine BaseToken.
  */
 export function getBinanceBaseToken(binanceIncoming: string): string | undefined {
+  // returns the correct symbol that our exchage works upon 
   return binanceFeedMap[binanceIncoming.toLowerCase()];
 }
 

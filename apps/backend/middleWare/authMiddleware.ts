@@ -19,11 +19,9 @@ export function authmiddleware ( req : Request , res: Response , next :NextFunct
             next();
         }
         else{
-
             res.status(403).json({
-
-                message: "Incorrect token "
-            })
+               message: "Incorrect token "
+            }) 
         }
         
 

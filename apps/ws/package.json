@@ -1,0 +1,21 @@
+{
+  "name": "ws",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "bun check"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "common": "workspace:*",
+    "jsonwebtoken": "^9.0.3",
+    "redis": "^6.3.1"
+  }
+}

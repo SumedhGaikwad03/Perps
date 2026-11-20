@@ -61,7 +61,8 @@ export function startBinanceWebSocket() {
 
       // in the markprices map we set the base token and the correspoinding price for the same
       if (baseToken) {
-        //setMarkPrice(baseToken, tick.c);
+        // update the base token price in the markprices map in binance here 
+       setMarkPrice(baseToken, tick.c);
 
         console.log(
           `  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`,
