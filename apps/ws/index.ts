@@ -141,7 +141,7 @@ const server = Bun.serve<SocketData>({
 
     return upgraded ? undefined : new Response("WebSocket upgrade failed ", {status : 404});
  },
-// need to 
+// need to check for the websocket 
  websocket : {
     open(ws){
         // user is authtecated via handshake url token 
@@ -216,11 +216,30 @@ const server = Bun.serve<SocketData>({
    }
 
    // now its time to unscribe form the websocket 
+   if(data.action === "unsubscribe" && Array.isArray(data.channels)){
+
+     for(const ch of data.channels){
+      
+      // we havr to remove this from the main channel as 
+      // delete this socket form the main channel 
+      channelSubscriber.get(ch)?.delete(ws);
+      // we also remove it form the users websocket here 
+      ws.data.subscriptions.delete(ch);
+
+     }
+     ws.send(JSON.stringify({type : "unsubscribe" , channels : data.channels}));
+     return;
+
+
+   }
 
    
 
    // ti
  }catch(error){
+
+    ws.send(JSON.stringify({type : "error", message : "invald data format "}));
+    return ;
 
 
  }
