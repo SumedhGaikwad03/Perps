@@ -240,6 +240,14 @@ export async function handleCancelOrder(
 
       mirrorOrderBookDepth(marketId);
 
+      // notify user websocket directly that the order is cancelled now
+      publisher.publish(`pub:user:${userId}`, JSON.stringify({
+        eventType: "ORDER_CANCELLED",
+        orderId,
+        marketId,
+        status: "CANCELLED",
+      })).catch((err) => console.error("Error publishing order cancellation:", err));
+
       await publisher.xAdd("to-backend", "*", {
         loopbackId,
         status: "SUCCESS",

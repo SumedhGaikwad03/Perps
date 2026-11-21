@@ -38,10 +38,11 @@ const userSocket = new Map<string , Set<ServerWebSocket<SocketData>>>();
 // creating a redis subscriber client now 
 
 const subscriber = createClient();
+const redisReader = createClient();
 
-await subscriber.connect();
+await Promise.all([subscriber.connect(), redisReader.connect()]);
 
-console.log("connected to redis pub  sub ");
+console.log("connected to redis pub sub and reader");
 
 // checks if the basetoken is present as a key in the mao here 
 async function ensureRedisSubscription (channel : string ){
@@ -208,6 +209,15 @@ const server = Bun.serve<SocketData>({
         channelSubscriber.get(ch)!.add(ws);
         // now add the ch in the users array 
         ws.data.subscriptions.add(ch);
+
+        // send cached snapshot immediately so quiet markets are not blank on connect 
+        if (ch.startsWith("depth:")) {
+          const target = ch.replace("depth:", "");
+          const cached = await redisReader.hGet(`market:${target}:depth`, "data");
+          if (cached && ws.readyState === 1) {
+            ws.send(JSON.stringify({ channel: ch, data: JSON.parse(cached) }));
+          }
+        }
     }
     // now the linking for all the parties is covered here , this is the response to the user that he is subscriped to the socket 
 
@@ -239,10 +249,32 @@ const server = Bun.serve<SocketData>({
  }catch(error){
 
     ws.send(JSON.stringify({type : "error", message : "invald data format "}));
-    return ;
-
 
  }
+
+
+ },
+
+ close(ws){
+    // time to close all the websocket connection of this from the main frame now 
+
+    // delete the ws form all the global frame 
+    for(const ch of ws.data.subscriptions){
+        channelSubscriber.get(ch)?.delete(ws);  
+    } 
+
+    // this will mostly be true for all here 
+    if(ws.data.userId){
+         userSocket.get(ws.data.userId)?.delete(ws);
+     if(userSocket.get(ws.data.userId)?.size ===0){
+        // we have to remove he user form the map now 
+        userSocket.delete(ws.data.userId);
+     }
+    }
+
+
+
 }}
 
-})
+});
+console.log(`ws gatway is listenig on the ws:/localhost/${PORT}`);

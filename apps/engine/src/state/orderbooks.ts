@@ -62,6 +62,16 @@ publisher.hSet(`market:${marketId}:depth`,"data", JSON.stringify(depthSnapshot))
 console.error("There was an error in making the snahot for the engine possible as", error);
 });
 
+// now to broadcast that depth to the main dashborard what we can do is 
+
+publisher.publish(`pub:depth:${marketId}`, JSON.stringify(depthSnapshot))
+.catch((err)=> console.error("Error publishing depth by marketId:", err));
+
+publisher.publish(`pub:depth:${book.symbol}`, JSON.stringify(depthSnapshot))
+.catch((err)=> console.error("Error publishing depth by symbol:", err));
+
+
+
 
 
 }
@@ -156,7 +166,9 @@ if(!publisher.isOpen){
 } 
 // we are naming this field as with the data as order.orderId as a single user can have many orders 
 publisher.hSet(`user:${order.userId}:open_orders`, order.orderId , JSON.stringify(order))
-.catch((err)=> console.log("THERE HAS BEEN AN ERROR BROOO..")); 
+.catch((err)=> console.log("THERE HAS BEEN AN ERROR BROOO.."));
+
+
 
 
 }

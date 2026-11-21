@@ -527,7 +527,16 @@ export async function executeMatchingFunction(
 
 
   } 
-  // this is done is 
+  // this is we havt to tell the user that the order is done and is ready a that info should go to the 
+  // dashboard websocket now 
+  publisher.publish(`pub:user:${userId}`, JSON.stringify({
+      eventType : "ORDER_UPDATE",
+      orderId ,
+      status : finalStatus,
+      executeQty : exuctedQty.toString(),
+      remaningQty : remaningQty.toString(),
+  }))
+  .catch((err)=> `The error is defined as ${err}`);
 
   await publisher.xAdd("db-events", "*", {
     eventType: "ORDER_ACCEPTED",
@@ -547,7 +556,24 @@ export async function executeMatchingFunction(
       fills,
     }),
   });
-mirrorOrderBookDepth(marketId);
+
+  // time to broadcast all executed trades to websocket subscribers now
+  if (fills.length > 0) {
+    const tradePayload = JSON.stringify({
+      marketId,
+      symbol: book.symbol,
+      fills,
+      timestamp: Date.now(),
+    });
+    publisher
+      .publish(`pub:trades:${marketId}`, tradePayload)
+      .catch((err) => console.error("Error publishing trades by marketId:", err));
+    publisher
+      .publish(`pub:trades:${book.symbol}`, tradePayload)
+      .catch((err) => console.error("Error publishing trades by symbol:", err));
+  }
+
+  mirrorOrderBookDepth(marketId);
   await publisher.xAdd("to-backend", "*", {
     loopbackId,
     status: "SUCCESS",
