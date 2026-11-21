@@ -224,11 +224,29 @@ export async function executeMatchingFunction(
         parseFloat(priceLevel?.totalQty!) - matchQty
       ).toString();
 
-      // if the entire order is filled then we have to dequee that order
+      const isMakerFullyFilled =
+        parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty);
 
-      if (
-        parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty)
-      ) {
+      // notify maker user websocket directly that their order was filled / updated now
+      publisher
+        .publish(
+          `pub:user:${restingOrder!.userId}`,
+          JSON.stringify({
+            eventType: "ORDER_UPDATE",
+            orderId: restingOrder!.originalOrderId,
+            status: isMakerFullyFilled ? "FILLED" : "PARTIALLY_FILLED",
+            executeQty: restingOrder!.filledQty,
+            remaningQty: (
+              parseFloat(restingOrder!.qty) - parseFloat(restingOrder!.filledQty)
+            ).toString(),
+          }),
+        )
+        .catch((err) =>
+          console.error("Error publishing maker order update:", err),
+        );
+
+      // if the entire order is filled then we have to dequee that order
+      if (isMakerFullyFilled) {
         // this removes the order at index 0 and slides every other order by one position
         priceLevel?.orders.shift();
         DeleteMirrordOpenOrder(restingOrder!.userId, restingOrder!.originalOrderId);
@@ -295,7 +313,7 @@ export async function executeMatchingFunction(
           payload: JSON.stringify({
             userId: fill.makerUserId,
             amountAvail: makerBal.available_bal,
-            amountLocked: updatedLockedBalance,
+            amountLocked: updatedLockedBalance.toString(),
           }),
         });
       }

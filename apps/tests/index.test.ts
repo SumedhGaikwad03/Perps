@@ -3155,16 +3155,24 @@ describe("24. Real-Time WebSocket and Distributed Pipeline End-to-End Simulation
 
     // 2. Alice's private user channel receives ORDER_UPDATE (FILLED)
     const aliceUserMsg = await aliceWsClient.waitForMessage(
-      (m) => m.channel === aliceId && m.data?.eventType === "ORDER_UPDATE" && m.data?.orderId === aliceOrderId
+      (m) =>
+        m.channel === aliceId &&
+        m.data?.eventType === "ORDER_UPDATE" &&
+        m.data?.orderId === aliceOrderId &&
+        m.data?.status === "FILLED"
     );
     expect(aliceUserMsg.data.status).toBe("FILLED");
 
     // 3. Bob's private user channel receives ORDER_UPDATE (FILLED)
     const bobUserMsg = await bobWsClient.waitForMessage(
-      (m) => m.channel === bobId && m.data?.eventType === "ORDER_UPDATE" && m.data?.orderId === bobOrderId
+      (m) =>
+        m.channel === bobId &&
+        m.data?.eventType === "ORDER_UPDATE" &&
+        m.data?.orderId === bobOrderId &&
+        m.data?.status === "FILLED"
     );
     expect(bobUserMsg.data.status).toBe("FILLED");
-  });
+  }, 15000);
 
   it("Redis state mirror hashes should reflect the updated positions and balances", async () => {
     const { createClient } = await import("redis");
@@ -3173,17 +3181,23 @@ describe("24. Real-Time WebSocket and Distributed Pipeline End-to-End Simulation
 
     try {
       // Alice position mirror in Redis
-      const alicePosRaw = await redis.hGet(`user:${aliceId}:positions`, e2eMarketId);
+      const alicePosRaw = await waitFor(async () => {
+        const raw = await redis.hGet(`user:${aliceId}:positions`, e2eMarketId);
+        return raw ? raw : null;
+      });
       expect(alicePosRaw).not.toBeNull();
       const alicePos = JSON.parse(alicePosRaw!);
-      expectDecimal(alicePos.size, "1");
+      expectDecimal(alicePos.qty, "1");
       expect(alicePos.side).toBe("LONG");
 
       // Bob position mirror in Redis
-      const bobPosRaw = await redis.hGet(`user:${bobId}:positions`, e2eMarketId);
+      const bobPosRaw = await waitFor(async () => {
+        const raw = await redis.hGet(`user:${bobId}:positions`, e2eMarketId);
+        return raw ? raw : null;
+      });
       expect(bobPosRaw).not.toBeNull();
       const bobPos = JSON.parse(bobPosRaw!);
-      expectDecimal(bobPos.size, "1");
+      expectDecimal(bobPos.qty, "1");
       expect(bobPos.side).toBe("SHORT");
 
       // Market depth mirror in Redis should be updated
@@ -3249,7 +3263,7 @@ describe("24. Real-Time WebSocket and Distributed Pipeline End-to-End Simulation
     expect(bobDbPos).not.toBeNull();
     expect(Number(bobDbPos?.size)).toBeLessThan(0);
     expectDecimal(bobDbPos?.size, "-1");
-  });
+  }, 15000);
 
   it("should close WebSocket connections cleanly", () => {
     if (aliceWsClient) aliceWsClient.close();

@@ -415,12 +415,15 @@ async function handelWalletUpdate(payload: Payloads.WalletTransactionPayload) {
   await prisma.wallet.upsert({
     where: { userId },
 
-    update: { amountAvail, amountLocked },
+    update: {
+      amountAvail: String(amountAvail),
+      amountLocked: String(amountLocked),
+    },
 
     create: {
       userId: userId,
-      amountAvail: amountAvail,
-      amountLocked: amountLocked,
+      amountAvail: String(amountAvail),
+      amountLocked: String(amountLocked),
     },
   });
 
