@@ -2905,4 +2905,357 @@ describe("23. Order Execution Edge Cases", () => {
   });
 });
 
+// =====================================================
+// TEST 24: REAL-TIME WEBSOCKET & DISTRIBUTED PIPELINE E2E
+// =====================================================
+
+describe("24. Real-Time WebSocket and Distributed Pipeline End-to-End Simulation", () => {
+  const e2eSuffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+  const ALICE_USER = `alice_${e2eSuffix}`;
+  const BOB_USER = `bob_${e2eSuffix}`;
+  const WS_URL = process.env.WS_URL || "ws://localhost:3001";
+  const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+
+  let aliceToken = "";
+  let aliceId = "";
+  let bobToken = "";
+  let bobId = "";
+
+  let e2eMarketId = "";
+  let e2eMarketSymbol = "";
+
+  let aliceWsClient: {
+    ws: WebSocket;
+    messages: any[];
+    waitForMessage: (predicate: (msg: any) => boolean, timeoutMs?: number) => Promise<any>;
+    close: () => void;
+  };
+
+  let bobWsClient: {
+    ws: WebSocket;
+    messages: any[];
+    waitForMessage: (predicate: (msg: any) => boolean, timeoutMs?: number) => Promise<any>;
+    close: () => void;
+  };
+
+  let aliceOrderId = "";
+  let bobOrderId = "";
+
+  // helper to connect to websocket and buffer all incoming frames
+  function connectWs(url: string): Promise<typeof aliceWsClient> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      const messages: any[] = [];
+
+      ws.onmessage = (event) => {
+        try {
+          messages.push(JSON.parse(event.data.toString()));
+        } catch {
+          messages.push(event.data);
+        }
+      };
+
+      ws.onopen = () => {
+        resolve({
+          ws,
+          messages,
+          waitForMessage: async (predicate, timeoutMs = 10000) => {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+              const found = messages.find(predicate);
+              if (found) return found;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            throw new Error(`Timed out waiting for WS message. Received so far: ${JSON.stringify(messages)}`);
+          },
+          close: () => {
+            try {
+              ws.close();
+            } catch {}
+          },
+        });
+      };
+
+      ws.onerror = (err) => {
+        reject(err);
+      };
+    });
+  }
+
+  it("should register Alice and Bob and deposit collateral", async () => {
+    // register alice
+    const aliceSignup = await api.post("/api/v1/signup", {
+      username: ALICE_USER,
+      password: PASSWORD,
+    });
+    expect(aliceSignup.status).toBe(201);
+    aliceId = aliceSignup.data.id;
+
+    const aliceSignin = await api.post("/api/v1/signin", {
+      username: ALICE_USER,
+      password: PASSWORD,
+    });
+    expect(aliceSignin.status).toBe(200);
+    aliceToken = aliceSignin.data.token;
+
+    // register bob
+    const bobSignup = await api.post("/api/v1/signup", {
+      username: BOB_USER,
+      password: PASSWORD,
+    });
+    expect(bobSignup.status).toBe(201);
+    bobId = bobSignup.data.id;
+
+    const bobSignin = await api.post("/api/v1/signin", {
+      username: BOB_USER,
+      password: PASSWORD,
+    });
+    expect(bobSignin.status).toBe(200);
+    bobToken = bobSignin.data.token;
+
+    // deposit collateral for alice and bob
+    const aliceRamp = await api.post("/api/v1/onRamp", { amount: "100000" }, auth(aliceToken));
+    expect(aliceRamp.status).toBe(200);
+
+    const bobRamp = await api.post("/api/v1/onRamp", { amount: "100000" }, auth(bobToken));
+    expect(bobRamp.status).toBe(200);
+  });
+
+  it("should create a dedicated BTC_USDC market for the test", async () => {
+    e2eMarketSymbol = `BTC_${e2eSuffix}`;
+
+    const res = await api.post(
+      "/api/v1/admin/market",
+      {
+        symbol: e2eMarketSymbol,
+        slug: e2eMarketSymbol.toLowerCase(),
+        baseToken: "BTC",
+        imgUrl: "btc.png",
+        tickSize: "1",
+        stepSize: "0.001",
+      },
+      {
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          token: aliceToken,
+          "x-admin-token": ADMIN_TOKEN,
+          admin_secret: ADMIN_TOKEN,
+        },
+      }
+    );
+
+    expectSuccessfulResponse(res.status);
+    expect(res.data.id).toBeDefined();
+    e2eMarketId = res.data.id;
+  });
+
+  it("should connect Alice and Bob to the WebSocket gateway and subscribe to channels", async () => {
+    // connect alice with token in handshake url
+    aliceWsClient = await connectWs(`${WS_URL}?token=${aliceToken}`);
+    expect(aliceWsClient.ws.readyState).toBe(1);
+
+    // wait for connected confirmation
+    await aliceWsClient.waitForMessage((m) => m.type === "connected");
+
+    // subscribe alice to public depth and trades for the market
+    aliceWsClient.ws.send(
+      JSON.stringify({
+        action: "subscribe",
+        channels: [`depth:${e2eMarketSymbol}`, `trades:${e2eMarketSymbol}`],
+      })
+    );
+    await aliceWsClient.waitForMessage((m) => m.type === "subscribed");
+
+    // connect bob without token in url, then authenticate using in-socket auth message
+    bobWsClient = await connectWs(WS_URL);
+    expect(bobWsClient.ws.readyState).toBe(1);
+    await bobWsClient.waitForMessage((m) => m.type === "connected");
+
+    bobWsClient.ws.send(JSON.stringify({ action: "auth", token: bobToken }));
+    await bobWsClient.waitForMessage((m) => m.type === "authenticated" && m.userId === bobId);
+
+    // subscribe bob to public depth and trades for the market
+    bobWsClient.ws.send(
+      JSON.stringify({
+        action: "subscribe",
+        channels: [`depth:${e2eMarketSymbol}`, `trades:${e2eMarketSymbol}`],
+      })
+    );
+    await bobWsClient.waitForMessage((m) => m.type === "subscribed");
+  });
+
+  it("Alice places a Limit BUY at $89,000 and broadcasts depth tick", async () => {
+    const res = await api.post(
+      "/api/v1/order",
+      {
+        price: "89000",
+        qty: "1",
+        side: "BID",
+        marketId: e2eMarketId,
+        orderType: "LIMIT",
+        leverage: "5",
+        timeInForce: "GTC",
+        reduceOnly: false,
+      },
+      auth(aliceToken)
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.data.orderId).toBeDefined();
+    aliceOrderId = res.data.orderId;
+    expect(res.data.result.status).toBe("OPEN");
+
+    // both alice and bob should receive live depth tick showing bid at 89000
+    const depthMsg = await aliceWsClient.waitForMessage(
+      (m) => m.channel === `depth:${e2eMarketSymbol}` && Array.isArray(m.data?.bids)
+    );
+    expect(depthMsg.data.bids.some((b: any[]) => String(b[0]) === "89000")).toBe(true);
+  });
+
+  it("Bob places a Limit SELL at $89,000 to cross and execute the match in RAM", async () => {
+    const res = await api.post(
+      "/api/v1/order",
+      {
+        price: "89000",
+        qty: "1",
+        side: "ASK",
+        marketId: e2eMarketId,
+        orderType: "LIMIT",
+        leverage: "5",
+        timeInForce: "GTC",
+        reduceOnly: false,
+      },
+      auth(bobToken)
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.data.orderId).toBeDefined();
+    bobOrderId = res.data.orderId;
+
+    // verify matching engine executed the fill in RAM
+    const result = res.data.result;
+    expect(result.status).toBe("FILLED");
+    expectDecimal(result.exuctedQty, "1");
+    expectDecimal(result.remaningQty, "0");
+    expect(result.fills).toHaveLength(1);
+    expectDecimal(result.fills[0].price, "89000");
+    expectDecimal(result.fills[0].qty, "1");
+  });
+
+  it("both WebSockets should receive the public trade tape execution and private user notifications", async () => {
+    // 1. Trade tape event received on public trades channel
+    const tradeEvent = await aliceWsClient.waitForMessage(
+      (m) =>
+        m.channel === `trades:${e2eMarketSymbol}` &&
+        Array.isArray(m.data?.fills) &&
+        m.data.fills.some((f: any) => String(f.price) === "89000")
+    );
+    expect(tradeEvent).toBeDefined();
+    expect(tradeEvent.data.symbol).toBe(e2eMarketSymbol);
+
+    // 2. Alice's private user channel receives ORDER_UPDATE (FILLED)
+    const aliceUserMsg = await aliceWsClient.waitForMessage(
+      (m) => m.channel === aliceId && m.data?.eventType === "ORDER_UPDATE" && m.data?.orderId === aliceOrderId
+    );
+    expect(aliceUserMsg.data.status).toBe("FILLED");
+
+    // 3. Bob's private user channel receives ORDER_UPDATE (FILLED)
+    const bobUserMsg = await bobWsClient.waitForMessage(
+      (m) => m.channel === bobId && m.data?.eventType === "ORDER_UPDATE" && m.data?.orderId === bobOrderId
+    );
+    expect(bobUserMsg.data.status).toBe("FILLED");
+  });
+
+  it("Redis state mirror hashes should reflect the updated positions and balances", async () => {
+    const { createClient } = await import("redis");
+    const redis = createClient({ url: REDIS_URL });
+    await redis.connect();
+
+    try {
+      // Alice position mirror in Redis
+      const alicePosRaw = await redis.hGet(`user:${aliceId}:positions`, e2eMarketId);
+      expect(alicePosRaw).not.toBeNull();
+      const alicePos = JSON.parse(alicePosRaw!);
+      expectDecimal(alicePos.size, "1");
+      expect(alicePos.side).toBe("LONG");
+
+      // Bob position mirror in Redis
+      const bobPosRaw = await redis.hGet(`user:${bobId}:positions`, e2eMarketId);
+      expect(bobPosRaw).not.toBeNull();
+      const bobPos = JSON.parse(bobPosRaw!);
+      expectDecimal(bobPos.size, "1");
+      expect(bobPos.side).toBe("SHORT");
+
+      // Market depth mirror in Redis should be updated
+      const depthRaw = await redis.hGet(`market:${e2eMarketId}:depth`, "data");
+      expect(depthRaw).not.toBeNull();
+    } finally {
+      await redis.quit();
+    }
+  });
+
+  it("db-events worker should persist fills, orders, and positions to PostgreSQL", async () => {
+    // 1. Check fills persisted in PostgreSQL
+    const fills = await waitFor(async () => {
+      const results = await prisma.fill.findMany({
+        where: {
+          OR: [{ maker_order_id: aliceOrderId }, { taker_order_id: bobOrderId }],
+        },
+      });
+      return results.length > 0 ? results : null;
+    });
+    expect(fills.length).toBeGreaterThanOrEqual(1);
+    expectDecimal(fills[0]?.price, "89000");
+    expectDecimal(fills[0]?.qty, "1");
+
+    // 2. Check Alice's order status is FILLED in PostgreSQL
+    const aliceDbOrder = await waitFor(async () => {
+      const order = await prisma.order.findUnique({
+        where: { id: aliceOrderId },
+      });
+      return order?.status === "FILLED" ? order : null;
+    });
+    expect(aliceDbOrder).not.toBeNull();
+    expect(aliceDbOrder?.status).toBe("FILLED");
+
+    // 3. Check Bob's order status is FILLED in PostgreSQL
+    const bobDbOrder = await waitFor(async () => {
+      const order = await prisma.order.findUnique({
+        where: { id: bobOrderId },
+      });
+      return order?.status === "FILLED" ? order : null;
+    });
+    expect(bobDbOrder).not.toBeNull();
+    expect(bobDbOrder?.status).toBe("FILLED");
+
+    // 4. Check Alice's position is persisted in PostgreSQL (>0 Long)
+    const aliceDbPos = await waitFor(async () => {
+      const pos = await prisma.position.findFirst({
+        where: { userId: aliceId, marketId: e2eMarketId },
+      });
+      return pos && String(pos.size) !== "0" ? pos : null;
+    });
+    expect(aliceDbPos).not.toBeNull();
+    expect(Number(aliceDbPos?.size)).toBeGreaterThan(0);
+    expectDecimal(aliceDbPos?.size, "1");
+
+    // 5. Check Bob's position is persisted in PostgreSQL (<0 Short)
+    const bobDbPos = await waitFor(async () => {
+      const pos = await prisma.position.findFirst({
+        where: { userId: bobId, marketId: e2eMarketId },
+      });
+      return pos && String(pos.size) !== "0" ? pos : null;
+    });
+    expect(bobDbPos).not.toBeNull();
+    expect(Number(bobDbPos?.size)).toBeLessThan(0);
+    expectDecimal(bobDbPos?.size, "-1");
+  });
+
+  it("should close WebSocket connections cleanly", () => {
+    if (aliceWsClient) aliceWsClient.close();
+    if (bobWsClient) bobWsClient.close();
+  });
+});
+
+
 
