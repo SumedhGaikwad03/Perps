@@ -7,6 +7,8 @@ import {
 } from "../state";
 import { publisher } from "../streams/publisher";
 
+// we pass four things to the redis client namely the 
+//1. command "narrowerd down" 2. loopbackid 3. streamEntry cliend read 
 export async function handleOnRamp(
   command: Extract<toEngine, { messageType: "ON_RAMP" }>,
   loopbackId: string,
@@ -72,6 +74,16 @@ export async function handleOnRamp(
           amountLocked: currentBalances.locked_bal,
         }),
       });
+
+      // publish to real-time websocket user channel so frontend updates immediately
+      publisher.publish(
+        `pub:user:${userId}`,
+        JSON.stringify({
+          eventType: "WALLET_UPDATE",
+          amountAvail: newBalance,
+          amountLocked: currentBalances.locked_bal,
+        })
+      );
 
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, streamEntryId);
       return;

@@ -1,4 +1,5 @@
 import type { OrderAcceptedPayload, toEngine } from "common";
+import Decimal from "decimal.js";
 import {
   getOrderBook,
   getOrCreateBalance,
@@ -27,7 +28,8 @@ export async function executeMatchingFunction(
 
   // time to destruture the counts here
 
-  const numQty = parseFloat(qty);
+  const dQty = new Decimal(qty);
+  const numQty = dQty.toNumber();
 
   const book = getOrderBook(marketId);
 
@@ -42,6 +44,7 @@ export async function executeMatchingFunction(
 
   // the logic for matching order is as follows
 
+  let dRemaningQty = dQty;
   let remaningQty = numQty;
 
   // this is an fills array that will execute once in the lifecycle as how many orders can it eat in the orderbook
@@ -168,77 +171,81 @@ export async function executeMatchingFunction(
     // is all is set for limit or simply the order is for market then
     //pull the the entrie order list  for this price key
     const priceLevel = opposingBook.get(priceKey);
+    if (!priceLevel) continue;
 
     // time to fill the order one at a time like this
 
-    while (priceLevel?.orders.length! > 0 && remaningQty > 0) {
+    while (priceLevel.orders.length > 0 && dRemaningQty.gt(0)) {
       // have to walk the order book to satifiy the orders we have injested
 
       // we extract the first order form the book
 
-      const restingOrder = priceLevel?.orders[0];
+      const restingOrder = priceLevel.orders[0]!;
 
-      const restingOrderRemaning =
-        parseFloat(restingOrder?.qty!) - parseFloat(restingOrder?.filledQty!);
+      const dRestingQty = new Decimal(restingOrder.qty);
+      const dRestingFilled = new Decimal(restingOrder.filledQty || "0");
+      const dRestingRemaining = Decimal.max(0, dRestingQty.minus(dRestingFilled));
 
-      // The quantity that is matched with the order is here
-      const matchQty = Math.min(remaningQty, restingOrderRemaning);
+      // The quantity that is matched with the order is calculated with exact Decimal math
+      const dMatchQty = Decimal.min(dRemaningQty, dRestingRemaining);
+      if (dMatchQty.lte(0)) {
+        break;
+      }
 
-      const makerReamainingMargin = parseFloat(restingOrder!.lockedMargin);
+      const matchQty = dMatchQty.toNumber();
+      const dMakerRemainingMargin = new Decimal(restingOrder.lockedMargin || "0");
 
-      const makerMarginToRelease =
-        restingOrderRemaning > 0
-          ? Math.min(
-              makerReamainingMargin,
-              (matchQty / restingOrderRemaning) * makerReamainingMargin,
-            )
-          : 0;
+      const dMakerMarginToRelease = dRestingRemaining.gt(0)
+        ? Decimal.min(
+            dMakerRemainingMargin,
+            dMatchQty.dividedBy(dRestingRemaining).times(dMakerRemainingMargin),
+          )
+        : new Decimal(0);
 
       // we push the orders that are filed into quantity so right now the inmemory array has all the executed orders in the book
       fills.push({
         price: priceKey,
-        qty: matchQty.toString(),
-        makerOrderId: restingOrder?.originalOrderId!,
-        makerUserId: restingOrder?.userId!,
-        makerUserLeverage: restingOrder?.leverage! || "1",
-        makerMarginToRealase: makerMarginToRelease.toString(),
+        qty: dMatchQty.toString(),
+        makerOrderId: restingOrder.originalOrderId!,
+        makerUserId: restingOrder.userId!,
+        makerUserLeverage: restingOrder.leverage! || "1",
+        makerMarginToRealase: dMakerMarginToRelease.toString(),
       });
 
       // this is the updation in the resting order that we just filled
-      restingOrder!.filledQty = (
-        parseFloat(restingOrder!.filledQty) + matchQty
-      ).toString();
+      const newRestingFilled = dRestingFilled.plus(dMatchQty);
+      restingOrder.filledQty = newRestingFilled.toString();
 
       // reducing the margin for the margin is as follows as
-
-      restingOrder!.lockedMargin = Math.max(
+      const newMakerLockedMargin = Decimal.max(
         0,
-        makerReamainingMargin - makerMarginToRelease,
-      ).toString();
+        dMakerRemainingMargin.minus(dMakerMarginToRelease),
+      );
+      restingOrder.lockedMargin = newMakerLockedMargin.toString();
 
-      // this is the updation in the user remaing qty of the originalr order
-      remaningQty -= matchQty;
+      // this is the updation in the user remaing qty of the original order
+      dRemaningQty = dRemaningQty.minus(dMatchQty);
+      remaningQty = dRemaningQty.toNumber();
 
-      // now the reduce  the volume at the sitting order here
-      priceLevel!.totalQty = (
-        parseFloat(priceLevel?.totalQty!) - matchQty
-      ).toString();
+      // now the reduce the volume at the sitting order here
+      const newTotalQty = Decimal.max(
+        0,
+        new Decimal(priceLevel.totalQty).minus(dMatchQty),
+      );
+      priceLevel.totalQty = newTotalQty.toString();
 
-      const isMakerFullyFilled =
-        parseFloat(restingOrder!.filledQty) >= parseFloat(restingOrder!.qty);
+      const isMakerFullyFilled = newRestingFilled.gte(dRestingQty);
 
       // notify maker user websocket directly that their order was filled / updated now
       publisher
         .publish(
-          `pub:user:${restingOrder!.userId}`,
+          `pub:user:${restingOrder.userId}`,
           JSON.stringify({
             eventType: "ORDER_UPDATE",
-            orderId: restingOrder!.originalOrderId,
+            orderId: restingOrder.originalOrderId,
             status: isMakerFullyFilled ? "FILLED" : "PARTIALLY_FILLED",
-            executeQty: restingOrder!.filledQty,
-            remaningQty: (
-              parseFloat(restingOrder!.qty) - parseFloat(restingOrder!.filledQty)
-            ).toString(),
+            executeQty: restingOrder.filledQty,
+            remaningQty: Decimal.max(0, dRestingQty.minus(newRestingFilled)).toString(),
           }),
         )
         .catch((err) =>
@@ -248,8 +255,28 @@ export async function executeMatchingFunction(
       // if the entire order is filled then we have to dequee that order
       if (isMakerFullyFilled) {
         // this removes the order at index 0 and slides every other order by one position
-        priceLevel?.orders.shift();
-        DeleteMirrordOpenOrder(restingOrder!.userId, restingOrder!.originalOrderId);
+        priceLevel.orders.shift();
+        DeleteMirrordOpenOrder(restingOrder.userId, restingOrder.originalOrderId);
+      } else {
+        // update maker resting order in redis open_orders mirror with new filledQty and status
+        publisher.hSet(
+          `user:${restingOrder.userId}:open_orders`,
+          restingOrder.originalOrderId,
+          JSON.stringify({
+            orderId: restingOrder.originalOrderId,
+            userId: restingOrder.userId,
+            marketId,
+            orderType: "LIMIT",
+            side: isBid ? "ASK" : "BID",
+            price: priceKey,
+            qty: restingOrder.qty,
+            filledQty: restingOrder.filledQty,
+            status: "PARTIALLY_FILLED",
+            lockedMargin: restingOrder.lockedMargin,
+            reduceOnly: restingOrder.reduceOnly,
+            createdAt: Date.now(),
+          })
+        ).catch((err) => console.error("Error updating maker open order in Redis:", err));
       }
 
       // if all the oders at the order book are eaten then we delete that price level
@@ -357,6 +384,20 @@ export async function executeMatchingFunction(
 
       const currentPosition = getPosition(posKey);
 
+      let liqPriceStr: string | null = null;
+      if (currentPosition) {
+        const entry = Number(currentPosition.entryPrice || 0);
+        const lev = Number(currentPosition.leverage || 1);
+        const mmr = 0.03;
+        if (entry > 0 && lev > 0) {
+          const liq =
+            currentPosition.side === "LONG"
+              ? Math.max(0, entry * (1 - 1 / lev + mmr))
+              : entry * (1 + 1 / lev - mmr);
+          liqPriceStr = liq.toFixed(2);
+        }
+      }
+
       // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means
       // the postionn was deleted by the in memory array so we just update the size of the postion to be zero
       const payload = currentPosition
@@ -369,7 +410,7 @@ export async function executeMatchingFunction(
                 : `-${currentPosition?.qty}`,
             entryPrice: currentPosition?.entryPrice,
             leverage: Number(currentPosition?.leverage),
-            liquidationPrice: null,
+            liquidationPrice: liqPriceStr,
           }
         : {
             userId: affectedUserId,
@@ -392,16 +433,19 @@ export async function executeMatchingFunction(
 
   finalStatus = "OPEN";
 
-  const exuctedQty = numQty - remaningQty; // this is the amount that is still left to be executed
+  const dExecutedQty = dQty.minus(dRemaningQty);
+  const exuctedQty = dExecutedQty.toNumber();
+  const executedQtyStr = dExecutedQty.toString();
+  const remaningQtyStr = dRemaningQty.toString();
 
-  if (remaningQty <= 0) {
+  if (dRemaningQty.lte(0)) {
     finalStatus = "FILLED";
      DeleteMirrordOpenOrder(userId,orderId);
     //return ;
   } else {
     //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
     if (orderType === "LIMIT" && command.timeInForce === "GTC") {
-      finalStatus = exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN";
+      finalStatus = dExecutedQty.gt(0) ? "PARTIALLY_FILLED" : "OPEN";
 
       // all the unfinished limit order must sit on the same side of the order book for all
       const targetSide = isBid ? book.bids : book.asks;
@@ -433,8 +477,8 @@ export async function executeMatchingFunction(
       level.orders.push({
         userId,
         originalOrderId: orderId,
-        qty: numQty.toString(),
-        filledQty: exuctedQty.toString(),
+        qty: dQty.toString(),
+        filledQty: executedQtyStr,
         leverage: userLeverage.toString(),
         lockedMargin: restingMarginLocked,
         reduceOnly: Boolean(command.reduceOnly),
@@ -551,8 +595,8 @@ export async function executeMatchingFunction(
       eventType : "ORDER_UPDATE",
       orderId ,
       status : finalStatus,
-      executeQty : exuctedQty.toString(),
-      remaningQty : remaningQty.toString(),
+      executeQty : executedQtyStr,
+      remaningQty : remaningQtyStr,
   }))
   .catch((err)=> `The error is defined as ${err}`);
 
@@ -561,8 +605,15 @@ export async function executeMatchingFunction(
     payload: JSON.stringify(OrderAcceptedPayload),
   });
 
-  if (orderType === "LIMIT" && remaningQty > 0) {
-    MirrorOpenOrder(OrderAcceptedPayload);
+  if (orderType === "LIMIT" && command.timeInForce === "GTC" && dRemaningQty.gt(0)) {
+    MirrorOpenOrder({
+      ...OrderAcceptedPayload,
+      filledQty: executedQtyStr,
+      status: dExecutedQty.gt(0) ? "PARTIALLY_FILLED" : "OPEN",
+    } as any);
+  } else {
+    // If order was IOC, FOK, MARKET, or 100% FILLED, ensure it does not sit in open_orders mirror
+    DeleteMirrordOpenOrder(userId, orderId);
   }
 
   await publisher.xAdd("db-events", "*", {
@@ -599,8 +650,8 @@ export async function executeMatchingFunction(
       orderId,
       marketId,
       status: finalStatus,
-      exuctedQty: exuctedQty.toString(),
-      remaningQty: remaningQty.toString(),
+      exuctedQty: executedQtyStr,
+      remaningQty: remaningQtyStr,
       fills,
     }),
     error: " ", // keeping it at top level so its easy to exectue at the top level

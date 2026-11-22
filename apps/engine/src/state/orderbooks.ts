@@ -2,6 +2,7 @@ import type { OrderBook } from "../types";
 import { DEFAULT_BASE_TOKEN_MAP } from "../config";
 import type  { OrderAcceptedPayload } from "common";
 import { publisher } from "../streams/publisher";
+import { getMarkPrice } from "./prices";
 
 // Master register that keeps all the order books in the engine
 const orderBooks = new Map<string, OrderBook>();
@@ -31,6 +32,7 @@ const bids : [string , string] [] = Array.from(book.bids.entries())
  .map(([price , level]) => [price , level.totalQty] as [string,string]) 
  //we have to remove the first level of the price level 
  .filter(([_ , qty]) => parseFloat(qty)>0)
+ // time to sort them in decending order here 
  .sort((a,b)=> parseFloat(b[0]) - parseFloat(a[0]))
  .slice(0,depth);
 
@@ -50,16 +52,20 @@ const depthSnapshot={
   marketId,
   symbol : book.symbol,
   lastTradedPrice : book.lastTradedPrice.toString(),
+  markPrice: getMarkPrice(book.baseToken) || book.lastTradedPrice.toString(),
   bids,
   asks,
   timestamp : Date.now()
 };
 
 // now we have to publish that hash in the system right 
-
 publisher.hSet(`market:${marketId}:depth`,"data", JSON.stringify(depthSnapshot))
 .catch((error)=> {
 console.error("There was an error in making the snahot for the engine possible as", error);
+});
+publisher.hSet(`market:${book.symbol}:depth`,"data", JSON.stringify(depthSnapshot))
+.catch((error)=> {
+console.error("There was an error in mirroring symbol depth:", error);
 });
 
 // now to broadcast that depth to the main dashborard what we can do is 
@@ -158,19 +164,18 @@ export function clearOrderBooks(): void {
 }
 
 // this is the function that would mirror open order back to the 
-
-export function MirrorOpenOrder(order : OrderAcceptedPayload) : void {
-  
-if(!publisher.isOpen){
-  return;
-} 
-// we are naming this field as with the data as order.orderId as a single user can have many orders 
-publisher.hSet(`user:${order.userId}:open_orders`, order.orderId , JSON.stringify(order))
-.catch((err)=> console.log("THERE HAS BEEN AN ERROR BROOO.."));
-
-
-
-
+export function MirrorOpenOrder(order : any) : void {
+  if(!publisher.isOpen){
+    return;
+  } 
+  const payloadToStore = {
+    ...order,
+    filledQty: (order as any).filledQty || "0",
+    status: (order as any).status || ((order as any).filledQty && parseFloat((order as any).filledQty) > 0 ? "PARTIALLY_FILLED" : "OPEN"),
+  };
+  // we are naming this field as with the data as order.orderId as a single user can have many orders 
+  publisher.hSet(`user:${order.userId}:open_orders`, order.orderId , JSON.stringify(payloadToStore))
+  .catch((err)=> console.log("THERE HAS BEEN AN ERROR BROOO.."));
 }
 
 export function DeleteMirrordOpenOrder(userId : string , orderId : string ){

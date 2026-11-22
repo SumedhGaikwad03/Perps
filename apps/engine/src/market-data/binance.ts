@@ -5,7 +5,9 @@ import {
   getBinanceStreams,
   setMarkPrice,
   getMarkPrice,
+  getAllOrderBooks,
 } from "../state";
+import { publisher } from "../streams/publisher";
 
 // this is used for normalsising the binace incoming tokens
 // this is for the use of users when they have to create new token for them selves
@@ -62,7 +64,39 @@ export function startBinanceWebSocket() {
       // in the markprices map we set the base token and the correspoinding price for the same
       if (baseToken) {
         // update the base token price in the markprices map in binance here 
-       setMarkPrice(baseToken, tick.c);
+        setMarkPrice(baseToken, tick.c);
+
+        // publish real-time mark price from Binance feed to Redis
+        if (publisher.isOpen) {
+          publisher.hSet("market:markPrices", baseToken, tick.c).catch(() => {});
+
+          const markPayload = JSON.stringify({
+            baseToken,
+            markPrice: tick.c,
+            timestamp: Date.now(),
+          });
+
+          publisher.publish(`pub:markPrice:${baseToken}`, markPayload).catch(() => {});
+
+          // broadcast for each matching orderbook
+          try {
+            for (const [mid, book] of getAllOrderBooks()) {
+              if (book.baseToken && book.baseToken.toUpperCase() === baseToken.toUpperCase()) {
+                const symbolPayload = JSON.stringify({
+                  marketId: mid,
+                  symbol: book.symbol,
+                  baseToken,
+                  markPrice: tick.c,
+                  timestamp: Date.now(),
+                });
+                publisher.publish(`pub:markPrice:${book.symbol}`, symbolPayload).catch(() => {});
+                publisher.publish(`pub:markPrice:${mid}`, symbolPayload).catch(() => {});
+                publisher.hSet(`market:${mid}:markPrice`, "data", tick.c).catch(() => {});
+                publisher.hSet(`market:${book.symbol}:markPrice`, "data", tick.c).catch(() => {});
+              }
+            }
+          } catch {}
+        }
 
         console.log(
           `  ${GREEN}➔ [STATE UPDATE]${RESET} markPrices ➔ ${MAGENTA}${baseToken}${RESET}: ${GREEN}${tick.c}${RESET}`,

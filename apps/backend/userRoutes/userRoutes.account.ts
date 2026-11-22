@@ -37,7 +37,25 @@ userRouter.get("/live", authmiddleware , async(req,res) => {
 
      // we now have raw balances and raw postions with the poen orders here 
      
-     const openOrders = rawOpenOrders ? Object.values(rawOpenOrders).map((openString)=> JSON.parse(openString)) : [] ; 
+     const openOrders = rawOpenOrders
+     //object values returns an array of values form onject 
+       ? Object.values(rawOpenOrders)
+           .map((openString) => {
+             try {
+               return JSON.parse(openString);
+             } catch {
+               return null;
+             }
+           })
+           .filter((o) => {
+             if (!o) return false;
+             if (o.status === "FILLED" || o.status === "CANCELLED") return false;
+             const q = parseFloat(o.qty || "0");
+             const f = parseFloat(o.filledQty || "0");
+             if (q > 0 && f >= q) return false;
+             return true;
+           })
+       : []; 
 
      const  balances = rawBalances? JSON.parse(rawBalances) : { available_bal: "0", locked_bal: "0" } ;
 

@@ -218,6 +218,15 @@ const server = Bun.serve<SocketData>({
             ws.send(JSON.stringify({ channel: ch, data: JSON.parse(cached) }));
           }
         }
+
+        if (ch.startsWith("markPrice:")) {
+          const target = ch.replace("markPrice:", "");
+          const cached = (await redisReader.hGet(`market:${target}:markPrice`, "data")) ||
+                         (await redisReader.hGet("market:markPrices", target));
+          if (cached && ws.readyState === 1) {
+            ws.send(JSON.stringify({ channel: ch, data: { markPrice: cached, symbol: target } }));
+          }
+        }
     }
     // now the linking for all the parties is covered here , this is the response to the user that he is subscriped to the socket 
 
