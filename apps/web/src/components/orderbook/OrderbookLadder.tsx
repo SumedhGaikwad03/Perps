@@ -102,7 +102,7 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
       <div className="flex items-center justify-between border-y border-borderDark bg-canvas px-3 py-1 font-mono text-xs">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-white">
-            ${parseFloat(markPrice || "0").toLocaleString()}
+            ${(orderbook.lastTradedPrice && parseFloat(orderbook.lastTradedPrice) > 0 ? parseFloat(orderbook.lastTradedPrice) : parseFloat(markPrice || "0")).toLocaleString()}
           </span>
           <span className="text-[10px] text-slate-500">Last</span>
         </div>

@@ -29,10 +29,11 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   setMarkets: (markets) => {
     set((state) => {
       const active = state.activeMarket || markets[0] || null;
+      const initialMark = active?.markPrice && parseFloat(active.markPrice) > 0 ? active.markPrice : state.markPrice;
       if (active) {
         setTimeout(() => get().fetchDepth(active.id), 0);
       }
-      return { markets, activeMarket: active };
+      return { markets, activeMarket: active, markPrice: initialMark };
     });
   },
 
@@ -87,8 +88,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
             lastTradedPrice: depthData.lastTradedPrice,
           },
           markPrice:
-            depthData.lastTradedPrice && parseFloat(depthData.lastTradedPrice) > 0
-              ? String(depthData.lastTradedPrice)
+            depthData.markPrice && parseFloat(depthData.markPrice) > 0
+              ? String(depthData.markPrice)
               : state.markPrice,
         }));
       }
@@ -98,11 +99,12 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   },
 
   setActiveMarket: (market) => {
-    set({
+    set((state) => ({
       activeMarket: market,
       orderbook: { bids: [], asks: [] },
       trades: [],
-    });
+      markPrice: market.markPrice && parseFloat(market.markPrice) > 0 ? market.markPrice : state.markPrice,
+    }));
     get().fetchDepth(market.id);
   },
 
@@ -118,7 +120,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   addTrade: (trade) => {
     set((state) => ({
       trades: [trade, ...state.trades.slice(0, 49)], // keep last 50 trades
-      markPrice: trade.price,
+      orderbook: {
+        ...state.orderbook,
+        lastTradedPrice: trade.price,
+      },
     }));
   },
 

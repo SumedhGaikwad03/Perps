@@ -89,6 +89,12 @@ marketRouter.get("/markets", async (_req, res) => {
         const depth = rawDepth ? JSON.parse(rawDepth) : null;
         const lastTradedPrice = depth ? depth.lastTradedPrice : "0";
 
+        // fetch live mark price from redis (Binance WebSocket feed)
+        const rawMarkPrice = (await redisClient.hGet("market:markPrices", m.baseToken)) ||
+                             (await redisClient.hGet(`market:${m.id}:markPrice`, "data")) ||
+                             (depth?.markPrice ? String(depth.markPrice) : undefined);
+        const markPrice = rawMarkPrice && parseFloat(rawMarkPrice) > 0 ? rawMarkPrice : (lastTradedPrice || "0");
+
         // we fetch the 24 hour fills from the db to calculate volume and high low
         const fills24h = await prisma.fill.findMany({
           where: {
@@ -99,13 +105,14 @@ marketRouter.get("/markets", async (_req, res) => {
         });
 
         let volume24h = 0;
-        let high24h = parseFloat(lastTradedPrice) || 0;
-        let low24h = parseFloat(lastTradedPrice) || 0;
+        const baselinePrice = parseFloat(markPrice) > 0 ? parseFloat(markPrice) : (parseFloat(lastTradedPrice) || 0);
+        let high24h = baselinePrice;
+        let low24h = baselinePrice;
 
         if (fills24h.length > 0) {
           high24h = -Infinity;
           low24h = Infinity;
-          const ltp = parseFloat(lastTradedPrice) || 0;
+          const ltp = baselinePrice;
           for (const fill of fills24h) {
             const p = parseFloat(fill.price);
             const q = parseFloat(fill.qty);
@@ -128,8 +135,9 @@ marketRouter.get("/markets", async (_req, res) => {
           stepSize: m.stepSize,
           imgUrl: m.imgUrl,
           lastTradedPrice,
-          high24h: high24h === -Infinity ? lastTradedPrice : high24h.toString(),
-          low24h: low24h === Infinity ? lastTradedPrice : low24h.toString(),
+          markPrice,
+          high24h: high24h === -Infinity ? markPrice : high24h.toString(),
+          low24h: low24h === Infinity ? markPrice : low24h.toString(),
           volume24h: volume24h.toFixed(2),
         };
       })

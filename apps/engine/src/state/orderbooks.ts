@@ -2,6 +2,7 @@ import type { OrderBook } from "../types";
 import { DEFAULT_BASE_TOKEN_MAP } from "../config";
 import type  { OrderAcceptedPayload } from "common";
 import { publisher } from "../streams/publisher";
+import { getMarkPrice } from "./prices";
 
 // Master register that keeps all the order books in the engine
 const orderBooks = new Map<string, OrderBook>();
@@ -51,6 +52,7 @@ const depthSnapshot={
   marketId,
   symbol : book.symbol,
   lastTradedPrice : book.lastTradedPrice.toString(),
+  markPrice: getMarkPrice(book.baseToken) || book.lastTradedPrice.toString(),
   bids,
   asks,
   timestamp : Date.now()

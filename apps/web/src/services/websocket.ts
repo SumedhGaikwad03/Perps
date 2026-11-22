@@ -7,12 +7,53 @@ const WS_URL = "ws://localhost:3001";
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
+  private binanceWs: WebSocket | null = null;
   private currentSymbol: string | null = null;
   private pingInterval: any = null;
   private reconnectTimeout: any = null;
   private isConnecting = false;
 
+  public initBinanceFeed() {
+    try {
+      if (this.binanceWs) return;
+      this.binanceWs = new WebSocket(
+        "wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker"
+      );
+
+      this.binanceWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          const tick = msg.data;
+          if (!tick?.s || !tick?.c) return;
+
+          const symbolUpper = tick.s.toUpperCase();
+          const baseToken = symbolUpper.startsWith("BTC")
+            ? "BTC"
+            : symbolUpper.startsWith("ETH")
+            ? "ETH"
+            : symbolUpper.startsWith("SOL")
+            ? "SOL"
+            : null;
+
+          const currentMarket = useMarketStore.getState().activeMarket;
+          const activeBase = (currentMarket?.baseToken || "BTC").toUpperCase();
+
+          if (baseToken === activeBase && parseFloat(tick.c) > 0) {
+            useMarketStore.getState().setMarkPrice(String(tick.c));
+          }
+        } catch {}
+      };
+
+      this.binanceWs.onerror = () => {};
+      this.binanceWs.onclose = () => {
+        this.binanceWs = null;
+        setTimeout(() => this.initBinanceFeed(), 5000);
+      };
+    } catch {}
+  }
+
   public connect(symbol?: string) {
+    this.initBinanceFeed();
     const token = localStorage.getItem("perps_token");
 
     if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
@@ -84,10 +125,17 @@ class WebSocketManager {
     }
 
     if (this.currentSymbol) {
+      const oldMarket = useMarketStore.getState().markets.find((m) => m.symbol === this.currentSymbol);
+      const oldBase = oldMarket?.baseToken || "BTC";
       // unsubscribe from old channels
       this.send({
         action: "unsubscribe",
-        channels: [`depth:${this.currentSymbol}`, `trades:${this.currentSymbol}`],
+        channels: [
+          `depth:${this.currentSymbol}`,
+          `trades:${this.currentSymbol}`,
+          `markPrice:${this.currentSymbol}`,
+          `markPrice:${oldBase}`,
+        ],
       });
     }
 
@@ -104,9 +152,17 @@ class WebSocketManager {
   private subscribeToMarket(symbol: string) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
+    const marketObj = useMarketStore.getState().markets.find((m) => m.symbol === symbol);
+    const baseToken = marketObj?.baseToken || "BTC";
+
     this.send({
       action: "subscribe",
-      channels: [`depth:${symbol}`, `trades:${symbol}`],
+      channels: [
+        `depth:${symbol}`,
+        `trades:${symbol}`,
+        `markPrice:${symbol}`,
+        `markPrice:${baseToken}`,
+      ],
     });
   }
 
@@ -115,6 +171,14 @@ class WebSocketManager {
 
     if (type === "pong") return;
 
+    // Real-time mark price from WebSocket
+    if (channel && channel.startsWith("markPrice:")) {
+      if (data && data.markPrice && parseFloat(data.markPrice) > 0) {
+        useMarketStore.getState().setMarkPrice(String(data.markPrice));
+      }
+      return;
+    }
+
     if (channel && channel.startsWith("depth:")) {
       if (data) {
         useMarketStore.getState().setOrderbook({
@@ -122,8 +186,9 @@ class WebSocketManager {
           asks: data.asks || [],
           lastTradedPrice: data.lastTradedPrice,
         });
-        if (data.lastTradedPrice) {
-          useMarketStore.getState().setMarkPrice(String(data.lastTradedPrice));
+        // only update markPrice if explicit markPrice is provided
+        if (data.markPrice && parseFloat(data.markPrice) > 0) {
+          useMarketStore.getState().setMarkPrice(String(data.markPrice));
         }
       }
       return;
@@ -191,6 +256,10 @@ class WebSocketManager {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+    }
+    if (this.binanceWs) {
+      this.binanceWs.close();
+      this.binanceWs = null;
     }
   }
 }
