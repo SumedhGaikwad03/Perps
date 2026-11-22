@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 
 import { authRouter } from "./coreRoutes/auth.routes";
 import { orderRouter } from "./coreRoutes/order.routes";
@@ -7,6 +8,14 @@ import { collateralRouter } from "./coreRoutes/collateral.routes";
 import { userRouter } from "./userRoutes/userRoutes.account";
 
 export const app = express();
+
+// enable cors for frontend clients
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "token", "x-admin-token", "admin_secret"],
+}));
 
 app.use(express.json()); // attaches the req data to the json body 
 
