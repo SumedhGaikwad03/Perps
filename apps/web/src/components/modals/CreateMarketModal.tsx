@@ -55,16 +55,16 @@ export const CreateMarketModal: React.FC<CreateMarketModalProps> = ({ isOpen, on
     setStepSize(specs.step);
     setImgUrl(DEFAULT_LOGOS[newBase]);
 
-    // Generate unique symbol if basic one already exists
-    let candidateSymbol = `${newBase}_USDC`;
-    let candidateSlug = `${newBase.toLowerCase()}_usdc`;
-    if (markets.some((m) => m.symbol === candidateSymbol)) {
-      const suffix = Math.floor(1000 + Math.random() * 9000);
-      candidateSymbol = `${newBase}_PERP_${suffix}`;
-      candidateSlug = `${newBase.toLowerCase()}_perp_${suffix}`;
-    }
+    const candidateSymbol = `${newBase}_USDC`;
+    const candidateSlug = `${newBase.toLowerCase()}_usdc`;
     setSymbol(candidateSymbol);
     setSlug(candidateSlug);
+
+    if (markets.some((m) => m.baseToken.toUpperCase() === newBase.toUpperCase())) {
+      setError(`A market for base token ${newBase} already exists in the system.`);
+    } else {
+      setError(null);
+    }
   };
 
   const handleSymbolChange = (val: string) => {
@@ -83,6 +83,11 @@ export const CreateMarketModal: React.FC<CreateMarketModalProps> = ({ isOpen, on
     const token = adminToken.trim();
     if (!token) {
       setError("Please provide an Admin Token to authorize market creation.");
+      return;
+    }
+
+    if (markets.some((m) => m.baseToken.toUpperCase() === baseToken.toUpperCase())) {
+      setError(`A market for base token ${baseToken} already exists. Only one market per base token is allowed.`);
       return;
     }
 

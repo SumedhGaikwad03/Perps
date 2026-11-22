@@ -199,18 +199,17 @@ marketRouter.post("/admin/market", adminMiddleWare, async (req, res) => {
         .json({ message: "The tick and step size are not vaild bro" });
     }
 
-    // check for dupicated markets now as the market with a similar symbol exist or not here
+    // check for duplicated markets: each base token can only have one market
     const existingMarket = await prisma.market.findFirst({
       where: {
-        // it checks if the symbol or slug exist in the market
-        OR: [{ symbol }, { slug }],
+        OR: [{ symbol }, { slug }, { baseToken }],
       },
     });
 
     if (existingMarket) {
       return res
         .status(409)
-        .json({ message: "The Market already exists bro " });
+        .json({ message: `Market already exists for base token ${baseToken} (${existingMarket.symbol})` });
     }
 
     // actual market creataion happens here
