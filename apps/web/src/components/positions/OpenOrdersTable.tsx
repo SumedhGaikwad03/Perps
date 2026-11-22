@@ -26,10 +26,10 @@ export const OpenOrdersTable: React.FC = () => {
   }
 
   return (
-    <div className="w-full overflow-x-auto">
-      <table className="w-full text-left font-mono text-xs">
+    <div className="w-full overflow-x-auto min-h-0">
+      <table className="w-full min-w-[760px] text-left font-mono text-xs">
         <thead>
-          <tr className="border-b border-borderDark text-[10px] uppercase tracking-wider text-slate-400">
+          <tr className="border-b border-borderDark text-[10px] uppercase tracking-wider text-slate-400 sticky top-0 bg-panel z-10">
             <th className="py-2 px-3">Order ID</th>
             <th className="py-2 px-3">Market</th>
             <th className="py-2 px-3">Side</th>

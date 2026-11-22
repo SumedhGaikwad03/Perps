@@ -119,13 +119,13 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
   const isLong = side === "BID";
 
   return (
-    <div className="flex h-full flex-col bg-panel p-3.5 text-xs">
+    <div className="flex h-full flex-col bg-panel p-3 text-xs overflow-y-auto min-h-0">
       {/* Long / Short Tabs */}
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1">
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1 shrink-0">
         <button
           type="button"
           onClick={() => setSide("BID")}
-          className={`flex items-center justify-center gap-1.5 rounded-md py-2 font-bold transition ${
+          className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 font-bold transition ${
             isLong
               ? "bg-bid text-black shadow-md shadow-bid/20"
               : "text-slate-400 hover:text-white"
@@ -138,7 +138,7 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
         <button
           type="button"
           onClick={() => setSide("ASK")}
-          className={`flex items-center justify-center gap-1.5 rounded-md py-2 font-bold transition ${
+          className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 font-bold transition ${
             !isLong
               ? "bg-ask text-white shadow-md shadow-ask/20"
               : "text-slate-400 hover:text-white"
@@ -150,7 +150,7 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
       </div>
 
       {/* Limit / Market Switch */}
-      <div className="mt-3 flex items-center gap-3 border-b border-borderDark pb-2.5">
+      <div className="mt-2.5 flex items-center gap-3 border-b border-borderDark pb-2 shrink-0">
         <button
           type="button"
           onClick={() => setOrderType("LIMIT")}
@@ -172,19 +172,19 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
       </div>
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 p-2 text-[11px] text-red-400">
+        <div className="mt-2 rounded-lg bg-red-500/10 border border-red-500/20 p-2 text-[11px] text-red-400 shrink-0">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="mt-3 rounded-lg bg-bid/10 border border-bid/20 p-2 text-[11px] text-bid">
+        <div className="mt-2 rounded-lg bg-bid/10 border border-bid/20 p-2 text-[11px] text-bid shrink-0">
           {success}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-3 flex flex-1 flex-col justify-between">
-        <div className="space-y-3">
+      <form onSubmit={handleSubmit} className="mt-2.5 flex flex-col gap-2.5 min-h-0">
+        <div className="space-y-2.5">
           {/* Price Input */}
           {orderType === "LIMIT" && (
             <div>
@@ -298,7 +298,7 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
           </div>
 
           {/* Margin Requirements Breakdown */}
-          <div className="rounded-lg bg-canvas p-2.5 space-y-1.5 border border-borderDark font-mono text-[11px]">
+          <div className="rounded-lg bg-canvas p-2.5 space-y-1.5 border border-borderDark font-mono text-[11px] shrink-0">
             <div className="flex justify-between text-slate-400">
               <span>Notional Value</span>
               <span className="text-white">${notional.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
@@ -321,11 +321,11 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
         </div>
 
         {/* Submit Order Button */}
-        <div className="mt-4">
+        <div className="mt-2 shrink-0 pb-1">
           <button
             type="submit"
             disabled={loading}
-            className={`w-full rounded-lg py-3 text-sm font-bold shadow-lg transition disabled:opacity-50 ${
+            className={`w-full rounded-lg py-2.5 text-sm font-bold shadow-lg transition disabled:opacity-50 ${
               isLong
                 ? "bg-bid text-black shadow-bid/20 hover:bg-emerald-400"
                 : "bg-ask text-white shadow-ask/20 hover:bg-red-600"

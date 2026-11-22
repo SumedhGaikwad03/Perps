@@ -195,8 +195,8 @@ export const TradingChart: React.FC = () => {
   return (
     <div className="relative flex h-full w-full flex-col bg-canvas">
       {/* Timeframe & Chart Controls Header */}
-      <div className="flex h-9 items-center justify-between border-b border-borderDark px-3">
-        <div className="flex items-center gap-1">
+      <div className="shrink-0 flex h-9 items-center justify-between border-b border-borderDark px-3">
+        <div className="flex items-center gap-1 shrink-0">
           {["1m", "5m", "15m", "1h", "4h", "1D"].map((tf) => (
             <button
               key={tf}
@@ -211,14 +211,14 @@ export const TradingChart: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+        <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono text-slate-500 shrink-0">
           <span className="h-1.5 w-1.5 rounded-full bg-bid animate-pulse" />
           <span>Persistent Canvas Engine</span>
         </div>
       </div>
 
       {/* Chart Canvas */}
-      <div ref={chartContainerRef} className="relative min-h-0 flex-1 w-full" />
+      <div ref={chartContainerRef} className="relative min-h-0 min-w-0 flex-1 w-full h-full overflow-hidden" />
     </div>
   );
 };

@@ -61,23 +61,23 @@ export const App: React.FC = () => {
   }, [isAuthenticated]);
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-canvas text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen w-screen flex-col bg-canvas text-slate-100 overflow-x-auto overflow-y-hidden font-sans">
       {/* Top Navbar */}
       <Header />
 
       {/* Main Terminal Layout */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0 min-w-[960px]">
         {/* Top Split: Chart + Orderbook/Trades + Order Entry */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left: Trading Chart Canvas */}
-          <div className="flex-1 border-r border-borderDark min-w-0">
+          <div className="flex-1 min-w-[360px] min-h-0 relative border-r border-borderDark flex flex-col overflow-hidden">
             <TradingChart />
           </div>
 
           {/* Center: Orderbook and Trade Tape with Tab Switcher */}
-          <div className="w-80 flex flex-col border-r border-borderDark min-w-[320px]">
+          <div className="w-80 shrink-0 min-w-[300px] min-h-0 flex flex-col border-r border-borderDark overflow-hidden bg-panel">
             {/* Center Switcher */}
-            <div className="flex h-8 items-center border-b border-borderDark bg-panel px-2 text-xs">
+            <div className="shrink-0 flex h-8 items-center border-b border-borderDark bg-panel px-2 text-xs">
               <button
                 onClick={() => setMiddleTab("book")}
                 className={`flex-1 py-1 text-center font-semibold transition ${
@@ -100,7 +100,7 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               {middleTab === "book" ? (
                 <OrderbookLadder onSelectPrice={(p) => setSelectedPrice(p)} />
               ) : (
@@ -110,13 +110,13 @@ export const App: React.FC = () => {
           </div>
 
           {/* Right: Order Entry Panel */}
-          <div className="w-72 min-w-[280px]">
+          <div className="w-72 md:w-80 shrink-0 min-w-[280px] min-h-0 flex flex-col overflow-hidden bg-panel">
             <OrderEntry selectedPrice={selectedPrice} />
           </div>
         </div>
 
         {/* Bottom Section: Positions & Orders Management */}
-        <div className="h-60 border-t border-borderDark">
+        <div className="h-56 md:h-60 shrink-0 min-h-[160px] flex flex-col overflow-hidden border-t border-borderDark">
           <BottomTabs />
         </div>
       </div>

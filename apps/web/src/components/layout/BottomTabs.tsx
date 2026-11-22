@@ -18,9 +18,9 @@ export const BottomTabs: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full flex-col bg-panel border-t border-borderDark">
+    <div className="flex h-full flex-col bg-panel">
       {/* Tab Switcher Header */}
-      <div className="flex h-9 items-center justify-between border-b border-borderDark px-3">
+      <div className="shrink-0 flex h-9 items-center justify-between border-b border-borderDark px-3">
         <div className="flex items-center gap-4 text-xs font-semibold">
           <button
             onClick={() => handleTabChange("positions")}
@@ -72,26 +72,26 @@ export const BottomTabs: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === "positions" && <PositionsTable />}
         {activeTab === "orders" && <OpenOrdersTable />}
         {activeTab === "balances" && (
-          <div className="grid grid-cols-3 gap-4 p-4 font-mono text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 font-mono text-xs">
             <div className="rounded-lg bg-canvas p-3 border border-borderDark">
-              <span className="text-slate-400">Available Collateral</span>
-              <p className="mt-1 text-lg font-bold text-white">
+              <span className="text-slate-400 text-[11px]">Available Collateral</span>
+              <p className="mt-1 text-base md:text-lg font-bold text-white">
                 ${parseFloat(wallet.amountAvail || "0").toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="rounded-lg bg-canvas p-3 border border-borderDark">
-              <span className="text-slate-400">Locked Initial Margin</span>
-              <p className="mt-1 text-lg font-bold text-slate-300">
+              <span className="text-slate-400 text-[11px]">Locked Initial Margin</span>
+              <p className="mt-1 text-base md:text-lg font-bold text-slate-300">
                 ${parseFloat(wallet.amountLocked || "0").toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="rounded-lg bg-canvas p-3 border border-borderDark">
-              <span className="text-slate-400">Total Account Value</span>
-              <p className="mt-1 text-lg font-bold text-bid">
+              <span className="text-slate-400 text-[11px]">Total Account Value</span>
+              <p className="mt-1 text-base md:text-lg font-bold text-bid">
                 ${(parseFloat(wallet.amountAvail || "0") + parseFloat(wallet.amountLocked || "0")).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>
             </div>

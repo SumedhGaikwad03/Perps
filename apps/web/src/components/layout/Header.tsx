@@ -69,11 +69,11 @@ export const Header: React.FC = () => {
 
   return (
     <>
-      <header className="flex h-12 w-full items-center justify-between border-b border-borderDark bg-panel px-4">
+      <header className="flex h-12 w-full shrink-0 items-center justify-between border-b border-borderDark bg-panel px-3 sm:px-4">
         {/* Left: Brand + Market Selector + Key Stats */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 lg:gap-5 min-w-0">
           {/* Brand Logo */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="h-2.5 w-2.5 rounded-full bg-bid animate-pulse shadow-sm shadow-bid" />
             <span className="text-base font-extrabold tracking-wider text-white">PERPS</span>
             <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold text-accent">
@@ -81,10 +81,10 @@ export const Header: React.FC = () => {
             </span>
           </div>
 
-          <div className="h-4 w-px bg-borderDark" />
+          <div className="h-4 w-px bg-borderDark shrink-0" />
 
           {/* Market Dropdown + Add Market Button */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <div className="relative">
               <button
                 onClick={() => setIsMarketDropdownOpen(!isMarketDropdownOpen)}
@@ -95,7 +95,7 @@ export const Header: React.FC = () => {
               </button>
 
               {isMarketDropdownOpen && (
-                <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-lg border border-borderDark bg-panel p-1.5 shadow-2xl">
+                <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-borderDark bg-panel p-1.5 shadow-2xl">
                   <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     <span>Perpetual Markets</span>
                     <span className="text-[9px] text-slate-500">{markets.length} active</span>
@@ -146,36 +146,36 @@ export const Header: React.FC = () => {
           </div>
 
           {/* Real-time Ticker Metrics */}
-          <div className="hidden items-center gap-5 text-xs md:flex">
-            <div>
+          <div className="hidden items-center gap-4 lg:gap-5 text-xs md:flex min-w-0">
+            <div className="shrink-0">
               <div className="text-[10px] text-slate-400">Mark Price</div>
               <div className={`font-mono font-bold ${isPositive ? "text-bid" : "text-ask"}`}>
                 ${parseFloat(currentPrice).toLocaleString()}
               </div>
             </div>
 
-            <div>
+            <div className="shrink-0">
               <div className="text-[10px] text-slate-400">24h Change</div>
               <div className={`font-mono font-medium ${isPositive ? "text-bid" : "text-ask"}`}>
                 {priceChange}
               </div>
             </div>
 
-            <div>
+            <div className="hidden xl:block shrink-0">
               <div className="text-[10px] text-slate-400">24h High</div>
               <div className="font-mono text-slate-200">
                 ${parseFloat(activeMarket?.high24h || "89500").toLocaleString()}
               </div>
             </div>
 
-            <div>
+            <div className="hidden xl:block shrink-0">
               <div className="text-[10px] text-slate-400">24h Low</div>
               <div className="font-mono text-slate-200">
                 ${parseFloat(activeMarket?.low24h || "87200").toLocaleString()}
               </div>
             </div>
 
-            <div>
+            <div className="hidden lg:block shrink-0">
               <div className="text-[10px] text-slate-400">Funding / Countdown</div>
               <div className="font-mono text-accent">{fundingRate} / {countdown}</div>
             </div>
@@ -183,7 +183,7 @@ export const Header: React.FC = () => {
         </div>
 
         {/* Right: Auth, Wallet, and On-Ramp */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {isAuthenticated ? (
             <>
               {/* Collateral Balance Pill */}

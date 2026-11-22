@@ -56,22 +56,22 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
   const spread = bestAsk > 0 && bestBid > 0 ? (bestAsk - bestBid).toFixed(2) : "0.00";
 
   return (
-    <div className="flex h-full flex-col bg-panel border-r border-borderDark text-xs">
+    <div className="flex h-full flex-col bg-panel text-xs">
       {/* Header */}
-      <div className="flex h-8 items-center justify-between border-b border-borderDark px-3 font-semibold text-slate-400">
+      <div className="shrink-0 flex h-8 items-center justify-between border-b border-borderDark px-3 font-semibold text-slate-400">
         <span>Order Book (L2)</span>
         <span className="text-[10px] text-slate-500 font-mono">Real-time</span>
       </div>
 
       {/* Column Headers */}
-      <div className="grid grid-cols-3 px-3 py-1 text-[10px] font-semibold text-slate-500">
+      <div className="shrink-0 grid grid-cols-3 px-3 py-1 text-[10px] font-semibold text-slate-500">
         <span>Price (USDC)</span>
         <span className="text-right">Size</span>
         <span className="text-right">Total</span>
       </div>
 
       {/* Asks (Red) */}
-      <div className="flex flex-1 flex-col justify-end overflow-hidden">
+      <div className="flex flex-1 min-h-0 flex-col justify-end overflow-hidden">
         {processedAsks.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-[11px] text-slate-600">
             No resting asks
@@ -100,7 +100,7 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
       </div>
 
       {/* Mid-Market Spread Banner */}
-      <div className="flex items-center justify-between border-y border-borderDark bg-canvas px-3 py-1 font-mono text-xs">
+      <div className="shrink-0 flex items-center justify-between border-y border-borderDark bg-canvas px-3 py-1 font-mono text-xs">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-white">
             ${(orderbook.lastTradedPrice && parseFloat(orderbook.lastTradedPrice) > 0 ? parseFloat(orderbook.lastTradedPrice) : parseFloat(markPrice || "0")).toLocaleString()}
@@ -113,7 +113,7 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
       </div>
 
       {/* Bids (Green) */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         {processedBids.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-[11px] text-slate-600">
             No resting bids
