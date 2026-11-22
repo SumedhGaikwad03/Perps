@@ -24,6 +24,8 @@ try {
 
 // at this point hopefully redis is connected now 
 
+// this is function re populate the engine with the things that are already stored in prisma model
+
 await bootstrapEngine(); 
 
 console.log("engine has started");

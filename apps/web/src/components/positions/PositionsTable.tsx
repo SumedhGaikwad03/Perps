@@ -5,24 +5,29 @@ import { orderService } from "../../services/api";
 
 export const PositionsTable: React.FC = () => {
   const { positions, fetchLiveUser } = useUserStore();
-  const { markPrice, markets } = useMarketStore();
+  const { markPrice, markets, activeMarket } = useMarketStore();
 
   const handleClosePosition = async (pos: any) => {
     try {
-      // close position via opposite market order
-      const closeSide = pos.side === "LONG" ? "ASK" : "BID";
-      await orderService.placeOrder({
-        marketId: pos.marketId,
-        side: closeSide,
-        orderType: "MARKET",
-        price: markPrice || pos.entryPrice,
-        qty: pos.qty,
-        leverage: pos.leverage,
-        reduceOnly: true,
-      });
+      // close position via backend dedicated exitPosition endpoint
+      await orderService.exitPosition(pos.marketId, pos.qty);
       await fetchLiveUser();
     } catch (e) {
-      console.error("Failed to close position:", e);
+      console.warn("exitPosition endpoint fallback to market order:", e);
+      try {
+        const closeSide = pos.side === "LONG" ? "ASK" : "BID";
+        await orderService.placeOrder({
+          marketId: pos.marketId,
+          side: closeSide,
+          orderType: "MARKET",
+          qty: pos.qty,
+          leverage: pos.leverage,
+          reduceOnly: true,
+        });
+        await fetchLiveUser();
+      } catch (err) {
+        console.error("Failed to close position:", err);
+      }
     }
   };
 
@@ -33,8 +38,6 @@ export const PositionsTable: React.FC = () => {
       </div>
     );
   }
-
-  const currentMark = parseFloat(markPrice || "0");
 
   return (
     <div className="w-full overflow-x-auto">
@@ -62,8 +65,14 @@ export const PositionsTable: React.FC = () => {
             const sizeNum = parseFloat(pos.qty || "0");
             const marginNum = parseFloat(pos.margin || "1");
 
-            // Calculate live PnL against current mark price
-            const markToUse = currentMark > 0 ? currentMark : entryNum;
+            // Calculate live PnL against the specific market's mark price
+            const isCurrentActive = activeMarket?.id === pos.marketId;
+            const liveActiveMark = parseFloat(markPrice || "0");
+            const marketStoredMark = parseFloat(marketObj?.markPrice || marketObj?.lastTradedPrice || "0");
+            const markToUse = isCurrentActive && liveActiveMark > 0
+              ? liveActiveMark
+              : (marketStoredMark > 0 ? marketStoredMark : entryNum);
+
             const pnl = isLong ? (markToUse - entryNum) * sizeNum : (entryNum - markToUse) * sizeNum;
             const roe = marginNum > 0 ? (pnl / marginNum) * 100 : 0;
             const isProfitable = pnl >= 0;

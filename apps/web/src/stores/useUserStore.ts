@@ -82,8 +82,8 @@ export const useUserStore = create<UserState>((set) => ({
                 side: parsed.side || parsed.orderSide || "BID",
                 price: String(parsed.price),
                 qty: String(parsed.qty),
-                filledQty: String(parsed.filledQty || "0"),
-                status: parsed.status || "OPEN",
+                filledQty: String(parsed.filledQty ?? parsed.executeQty ?? "0"),
+                status: parsed.status || (parsed.filledQty && parseFloat(parsed.filledQty) > 0 ? "PARTIALLY_FILLED" : "OPEN"),
                 orderType: parsed.orderType || "LIMIT",
                 createdAt: parsed.createdAt,
               });

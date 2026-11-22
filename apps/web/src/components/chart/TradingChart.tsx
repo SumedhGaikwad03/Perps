@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, ISeriesApi } from "lightweight-charts";
 import { useMarketStore } from "../../stores/useMarketStore";
 
@@ -6,7 +6,9 @@ export const TradingChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const candlesRef = useRef<any[]>([]);
 
+  const [activeTimeframe, setActiveTimeframe] = useState("1m");
   const { activeMarket, markPrice } = useMarketStore();
 
   useEffect(() => {
@@ -44,25 +46,47 @@ export const TradingChart: React.FC = () => {
       wickDownColor: "#ff3355",
     });
 
-    // Seed mock initial candlestick data for realism
-    const basePrice = activeMarket ? parseFloat(activeMarket.lastTradedPrice || "89000") : 89000;
-    const now = Math.floor(Date.now() / 1000);
-    const initialData = [];
-    let current = basePrice;
+    // Persistent Candlestick Data Retrieval
+    const marketSymbol = activeMarket?.symbol || "BTC_USDC";
+    const storageKey = `perps_chart_candles_${marketSymbol}`;
+    let candleData: any[] = [];
 
-    for (let i = 60; i >= 0; i--) {
-      const time = (now - i * 60) as any;
-      const change = (Math.random() - 0.49) * (basePrice * 0.003);
-      const open = current;
-      const close = open + change;
-      const high = Math.max(open, close) + Math.random() * (basePrice * 0.001);
-      const low = Math.min(open, close) - Math.random() * (basePrice * 0.001);
-      current = close;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        candleData = JSON.parse(saved);
+      }
+    } catch {}
 
-      initialData.push({ time, open, high, low, close });
+    // If no saved history exists, generate initial realistic bars and persist
+    if (!candleData || !Array.isArray(candleData) || candleData.length === 0) {
+      const basePrice = activeMarket
+        ? parseFloat(activeMarket.lastTradedPrice || activeMarket.markPrice || "89000")
+        : 89000;
+      const validBase = basePrice > 0 ? basePrice : 89000;
+      const now = Math.floor(Date.now() / 60000) * 60;
+      candleData = [];
+      let current = validBase;
+
+      for (let i = 60; i >= 0; i--) {
+        const time = now - i * 60;
+        const change = (Math.random() - 0.49) * (current * 0.002);
+        const open = current;
+        const close = Math.max(0.01, open + change);
+        const high = Math.max(open, close) + Math.random() * (current * 0.001);
+        const low = Math.min(open, close) - Math.random() * (current * 0.001);
+        current = close;
+
+        candleData.push({ time, open, high, low, close });
+      }
+
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(candleData));
+      } catch {}
     }
 
-    candleSeries.setData(initialData);
+    candlesRef.current = candleData;
+    candleSeries.setData(candleData);
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -83,37 +107,69 @@ export const TradingChart: React.FC = () => {
       window.removeEventListener("resize", handleResize);
       chart.remove();
     };
-  }, [activeMarket?.id]);
+  }, [activeMarket?.id, activeMarket?.symbol]);
 
-  // Update chart when real-time markPrice updates
+  // Real-time Bar Aggregation & Persistence when markPrice updates
   useEffect(() => {
     if (!candleSeriesRef.current || !markPrice || parseFloat(markPrice) <= 0) return;
 
     const price = parseFloat(markPrice);
-    const now = (Math.floor(Date.now() / 60000) * 60) as any;
+    const nowSec = Math.floor(Date.now() / 60000) * 60; // 1-minute bucket timestamp
 
-    try {
-      candleSeriesRef.current.update({
-        time: now,
-        open: price,
-        high: price * 1.0005,
-        low: price * 0.9995,
+    const lastIndex = candlesRef.current.length - 1;
+    const lastCandle = lastIndex >= 0 ? candlesRef.current[lastIndex] : null;
+
+    if (lastCandle && lastCandle.time === nowSec) {
+      // Update existing 1-minute candle
+      const updatedBar = {
+        time: nowSec,
+        open: lastCandle.open,
+        high: Math.max(lastCandle.high, price),
+        low: Math.min(lastCandle.low, price),
         close: price,
-      });
-    } catch {}
-  }, [markPrice]);
+      };
+      candlesRef.current[lastIndex] = updatedBar;
+      try {
+        candleSeriesRef.current.update(updatedBar as any);
+      } catch {}
+    } else {
+      // Open a new 1-minute candle bar
+      const newBar = {
+        time: nowSec,
+        open: lastCandle ? lastCandle.close : price,
+        high: price,
+        low: price,
+        close: price,
+      };
+      candlesRef.current.push(newBar);
+      try {
+        candleSeriesRef.current.update(newBar as any);
+      } catch {}
+    }
+
+    // Persist latest 300 bars to local storage
+    if (activeMarket?.symbol) {
+      try {
+        localStorage.setItem(
+          `perps_chart_candles_${activeMarket.symbol}`,
+          JSON.stringify(candlesRef.current.slice(-300))
+        );
+      } catch {}
+    }
+  }, [markPrice, activeMarket?.symbol]);
 
   return (
     <div className="relative flex h-full w-full flex-col bg-canvas">
       {/* Timeframe & Chart Controls Header */}
       <div className="flex h-9 items-center justify-between border-b border-borderDark px-3">
         <div className="flex items-center gap-1">
-          {["1m", "5m", "15m", "1h", "4h", "1D"].map((tf, idx) => (
+          {["1m", "5m", "15m", "1h", "4h", "1D"].map((tf) => (
             <button
               key={tf}
-              className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                idx === 1
-                  ? "bg-accent/20 text-accent"
+              onClick={() => setActiveTimeframe(tf)}
+              className={`rounded px-2 py-0.5 text-xs font-semibold transition ${
+                activeTimeframe === tf
+                  ? "bg-accent/20 text-accent font-bold"
                   : "text-slate-400 hover:bg-surface hover:text-white"
               }`}
             >
@@ -121,8 +177,9 @@ export const TradingChart: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="text-[11px] font-mono text-slate-500">
-          Lightweight Canvas Engine
+        <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-bid animate-pulse" />
+          <span>Persistent Canvas Engine</span>
         </div>
       </div>
 

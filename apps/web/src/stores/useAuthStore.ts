@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { UserProfile, UserWallet } from "../types";
 import { userService } from "../services/api";
+import { wsManager } from "../services/websocket";
 
 interface AuthState {
   user: UserProfile | null;
@@ -27,6 +28,7 @@ export const useAuthStore = create<AuthState>((set) => {
       localStorage.setItem("perps_token", user.token);
       localStorage.setItem("perps_user", JSON.stringify(user));
       set({ user, isAuthenticated: true });
+      wsManager.authenticate(user.token);
     },
 
     logout: () => {

@@ -16,6 +16,7 @@ interface MarketState {
   setMarkPrice: (price: string) => void;
   addMarket: (market: Market) => void;
   fetchMarkets: () => Promise<Market[]>;
+  fetchDepth: (marketId: string) => Promise<void>;
 }
 
 export const useMarketStore = create<MarketState>((set, get) => ({
@@ -28,6 +29,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   setMarkets: (markets) => {
     set((state) => {
       const active = state.activeMarket || markets[0] || null;
+      if (active) {
+        setTimeout(() => get().fetchDepth(active.id), 0);
+      }
       return { markets, activeMarket: active };
     });
   },
@@ -41,6 +45,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         activeMarket: market,
       };
     });
+    get().fetchDepth(market.id);
   },
 
   fetchMarkets: async () => {
@@ -52,9 +57,13 @@ export const useMarketStore = create<MarketState>((set, get) => ({
           const stillExists = currentActive
             ? marketsData.find((m: Market) => m.id === currentActive.id || m.symbol === currentActive.symbol)
             : null;
+          const target = stillExists || state.activeMarket || marketsData[0];
+          if (target) {
+            setTimeout(() => get().fetchDepth(target.id), 0);
+          }
           return {
             markets: marketsData,
-            activeMarket: stillExists || state.activeMarket || marketsData[0],
+            activeMarket: target,
           };
         });
         return marketsData;
@@ -66,12 +75,35 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     }
   },
 
+  fetchDepth: async (marketId: string) => {
+    try {
+      const res = await marketService.getDepth(marketId);
+      const depthData = res?.data || res;
+      if (depthData) {
+        set((state) => ({
+          orderbook: {
+            bids: depthData.bids || [],
+            asks: depthData.asks || [],
+            lastTradedPrice: depthData.lastTradedPrice,
+          },
+          markPrice:
+            depthData.lastTradedPrice && parseFloat(depthData.lastTradedPrice) > 0
+              ? String(depthData.lastTradedPrice)
+              : state.markPrice,
+        }));
+      }
+    } catch (e) {
+      console.error("Failed to fetch orderbook depth:", e);
+    }
+  },
+
   setActiveMarket: (market) => {
     set({
       activeMarket: market,
       orderbook: { bids: [], asks: [] },
       trades: [],
     });
+    get().fetchDepth(market.id);
   },
 
   setOrderbook: (data) => {

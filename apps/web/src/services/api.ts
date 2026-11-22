@@ -68,7 +68,7 @@ export const orderService = {
     marketId: string;
     orderType?: "LIMIT" | "MARKET";
     leverage?: string;
-    timeInForce?: "GTC" | "IOC";
+    timeInForce?: "GTC" | "FOK";
     reduceOnly?: boolean;
   }) => {
     const payload: any = {
@@ -90,6 +90,10 @@ export const orderService = {
     const res = await api.delete(`/order/${orderId}`, {
       data: { marketId, side },
     });
+    return res.data;
+  },
+  exitPosition: async (marketId: string, qty: string) => {
+    const res = await api.post("/exitPosition", { marketId, qty });
     return res.data;
   },
 };

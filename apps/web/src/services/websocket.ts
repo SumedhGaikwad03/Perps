@@ -13,7 +13,12 @@ class WebSocketManager {
   private isConnecting = false;
 
   public connect(symbol?: string) {
+    const token = localStorage.getItem("perps_token");
+
     if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
+      if (token) {
+        this.authenticate(token);
+      }
       if (symbol && symbol !== this.currentSymbol) {
         this.switchSymbol(symbol);
       }
@@ -23,7 +28,6 @@ class WebSocketManager {
     this.isConnecting = true;
     if (symbol) this.currentSymbol = symbol;
 
-    const token = localStorage.getItem("perps_token");
     const url = token ? `${WS_URL}?token=${token}` : WS_URL;
 
     try {
@@ -89,6 +93,12 @@ class WebSocketManager {
 
     this.currentSymbol = newSymbol;
     this.subscribeToMarket(newSymbol);
+  }
+
+  public authenticate(token: string) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.send({ action: "auth", token });
+    }
   }
 
   private subscribeToMarket(symbol: string) {

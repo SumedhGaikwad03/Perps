@@ -250,6 +250,25 @@ export async function executeMatchingFunction(
         // this removes the order at index 0 and slides every other order by one position
         priceLevel?.orders.shift();
         DeleteMirrordOpenOrder(restingOrder!.userId, restingOrder!.originalOrderId);
+      } else {
+        // update maker resting order in redis open_orders mirror with new filledQty and status
+        publisher.hSet(
+          `user:${restingOrder!.userId}:open_orders`,
+          restingOrder!.originalOrderId,
+          JSON.stringify({
+            orderId: restingOrder!.originalOrderId,
+            userId: restingOrder!.userId,
+            marketId: restingOrder!.marketId,
+            orderType: "LIMIT",
+            orderSide: restingOrder!.side,
+            price: restingOrder!.price,
+            qty: restingOrder!.qty,
+            filledQty: restingOrder!.filledQty,
+            status: "PARTIALLY_FILLED",
+            initialMargin: restingOrder!.initialMargin,
+            lockedMargin: restingOrder!.lockedMargin,
+          })
+        ).catch((err) => console.error("Error updating maker open order in Redis:", err));
       }
 
       // if all the oders at the order book are eaten then we delete that price level
@@ -562,7 +581,11 @@ export async function executeMatchingFunction(
   });
 
   if (orderType === "LIMIT" && remaningQty > 0) {
-    MirrorOpenOrder(OrderAcceptedPayload);
+    MirrorOpenOrder({
+      ...OrderAcceptedPayload,
+      filledQty: exuctedQty.toString(),
+      status: exuctedQty > 0 ? "PARTIALLY_FILLED" : "OPEN",
+    } as any);
   }
 
   await publisher.xAdd("db-events", "*", {

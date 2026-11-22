@@ -60,10 +60,18 @@ export const OpenOrdersTable: React.FC = () => {
                 </td>
                 <td className="py-2 px-3 text-slate-200">${parseFloat(order.price).toLocaleString()}</td>
                 <td className="py-2 px-3 text-slate-300">{order.qty}</td>
-                <td className="py-2 px-3 text-slate-400">{order.filledQty || "0"}</td>
+                <td className="py-2 px-3 font-mono font-medium text-slate-200">
+                  {order.filledQty || "0"}
+                </td>
                 <td className="py-2 px-3">
-                  <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
-                    {order.status}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                      order.status === "PARTIALLY_FILLED"
+                        ? "bg-amber-500/15 text-amber-400"
+                        : "bg-accent/10 text-accent"
+                    }`}
+                  >
+                    {order.status === "PARTIALLY_FILLED" ? "PARTIAL" : order.status}
                   </span>
                 </td>
                 <td className="py-2 px-3 text-right">

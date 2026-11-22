@@ -169,7 +169,7 @@ level.orders.push({
 
 level.totalQty = (parseFloat(level.totalQty) + unexecutedQty).toString();
 
-const payload :  OrderAcceptedPayload = {
+const payload : any = {
       orderId: o.id,
       userId: o.userId,
       marketId: o.marketId,
@@ -177,6 +177,8 @@ const payload :  OrderAcceptedPayload = {
       orderSide: o.orderSide,
       price: o.price,
       qty: o.qty,
+      filledQty: o.filledQty || "0",
+      status: o.status || "OPEN",
       timeInForce: o.timeInForce,
       reduceOnly: o.reduceOnly,
       initialMargin: o.initialMargin,
