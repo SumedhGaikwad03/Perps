@@ -43,7 +43,7 @@ export const marketService = {
 
 export const orderService = {
   placeOrder: async (data: {
-    price: string;
+    price?: string;
     qty: string;
     side: "BID" | "ASK";
     marketId: string;
@@ -52,13 +52,19 @@ export const orderService = {
     timeInForce?: "GTC" | "IOC";
     reduceOnly?: boolean;
   }) => {
-    const res = await api.post("/order", {
-      orderType: "LIMIT",
-      leverage: "5",
-      timeInForce: "GTC",
-      reduceOnly: false,
-      ...data,
-    });
+    const payload: any = {
+      orderType: data.orderType || "LIMIT",
+      leverage: data.leverage || "5",
+      timeInForce: data.timeInForce || "GTC",
+      reduceOnly: data.reduceOnly || false,
+      marketId: data.marketId,
+      side: data.side,
+      qty: data.qty,
+    };
+    if (data.orderType === "LIMIT" || (data.price && Number(data.price) > 0)) {
+      payload.price = data.price;
+    }
+    const res = await api.post("/order", payload);
     return res.data;
   },
   cancelOrder: async (orderId: string, marketId: string, side: "BID" | "ASK") => {

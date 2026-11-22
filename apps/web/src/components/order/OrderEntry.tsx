@@ -37,21 +37,27 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
     }
   }, [markPrice]);
 
-  // Calculations
-  const numericPrice = parseFloat(price || markPrice || "0");
+  // Calculations: fallback to active market price if live stream has no ticks yet
+  const currentMarkNum = parseFloat(markPrice || "0");
+  const marketLastPrice = parseFloat(activeMarket?.lastTradedPrice || activeMarket?.markPrice || "0");
+  const effectivePrice =
+    orderType === "LIMIT"
+      ? (parseFloat(price || "0") > 0 ? parseFloat(price) : (currentMarkNum > 0 ? currentMarkNum : (marketLastPrice > 0 ? marketLastPrice : 89000)))
+      : (currentMarkNum > 0 ? currentMarkNum : (marketLastPrice > 0 ? marketLastPrice : 89000));
+
   const numericQty = parseFloat(qty || "0");
   const numericLev = parseFloat(leverage || "1");
 
-  const notional = numericPrice * numericQty;
+  const notional = effectivePrice * numericQty;
   const initialMargin = numericLev > 0 ? notional / numericLev : 0;
 
   // Est. Liquidation Price: Price * (1 - (1/Lev) + MMR) for Long, Price * (1 + (1/Lev) - MMR) for Short
   const mmr = 0.03; // 3% maintenance margin
   const estLiqPrice =
-    numericPrice > 0 && numericLev > 0
+    effectivePrice > 0 && numericLev > 0
       ? side === "BID"
-        ? Math.max(0, numericPrice * (1 - 1 / numericLev + mmr))
-        : numericPrice * (1 + 1 / numericLev - mmr)
+        ? Math.max(0, effectivePrice * (1 - 1 / numericLev + mmr))
+        : effectivePrice * (1 + 1 / numericLev - mmr)
       : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,8 +74,8 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
       setError("Quantity must be greater than 0.");
       return;
     }
-    if (orderType === "LIMIT" && numericPrice <= 0) {
-      setError("Price must be greater than 0.");
+    if (orderType === "LIMIT" && parseFloat(price || "0") <= 0) {
+      setError("Price must be greater than 0 for Limit orders.");
       return;
     }
 
@@ -82,14 +88,19 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
         marketId: activeMarket.id,
         side,
         orderType,
-        price: orderType === "LIMIT" ? price : (markPrice || "89000"),
+        price: orderType === "LIMIT" ? price : undefined,
         qty,
         leverage,
       });
 
-      setSuccess(`Order submitted: ${res.orderId?.slice(0, 8)}... (${res.result?.status})`);
+      if (res.result?.status === "CANCELLED" && (!res.result?.fills || res.result.fills.length === 0)) {
+        setError("Market order cancelled: No resting orders in orderbook to match against. Place a Limit order first.");
+      } else {
+        setSuccess(`Order submitted: ${res.orderId?.slice(0, 8)}... (${res.result?.status})`);
+        setTimeout(() => setSuccess(null), 3000);
+      }
+
       await fetchLiveUser();
-      setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(
         err.response?.data?.message ||

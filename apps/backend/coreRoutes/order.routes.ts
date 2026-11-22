@@ -85,15 +85,7 @@ orderRouter.post(`/order`, authmiddleware, async (req: any, res) => {
       if (!Number.isFinite(numPrice) || isNaN(numPrice) || numPrice <= 0) {
         return res.status(400).json({ message: "Invalid price value" });
       }
-    } else if (price !== undefined && price !== null) {
-      if (
-        Array.isArray(price) ||
-        typeof price === "object" ||
-        typeof price === "boolean" ||
-        (typeof price === "string" && price.trim() === "")
-      ) {
-        return res.status(400).json({ message: "Invalid price format" });
-      }
+    } else if (price !== undefined && price !== null && price !== "" && price !== "0") {
       const numPrice = Number(price);
       if (!Number.isFinite(numPrice) || isNaN(numPrice) || numPrice <= 0) {
         return res.status(400).json({ message: "Invalid price value" });
