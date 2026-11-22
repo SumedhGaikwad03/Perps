@@ -31,6 +31,7 @@ const bids : [string , string] [] = Array.from(book.bids.entries())
  .map(([price , level]) => [price , level.totalQty] as [string,string]) 
  //we have to remove the first level of the price level 
  .filter(([_ , qty]) => parseFloat(qty)>0)
+ // time to sort them in decending order here 
  .sort((a,b)=> parseFloat(b[0]) - parseFloat(a[0]))
  .slice(0,depth);
 
