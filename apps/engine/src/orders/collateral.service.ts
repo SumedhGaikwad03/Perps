@@ -7,6 +7,8 @@ import {
 } from "../state";
 import { publisher } from "../streams/publisher";
 
+// we pass four things to the redis client namely the 
+//1. command "narrowerd down" 2. loopbackid 3. streamEntry cliend read 
 export async function handleOnRamp(
   command: Extract<toEngine, { messageType: "ON_RAMP" }>,
   loopbackId: string,
