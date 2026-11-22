@@ -1,5 +1,6 @@
 import React from "react";
 import { useMarketStore } from "../../stores/useMarketStore";
+import { formatQty } from "../../utils/format";
 
 export const TradeTape: React.FC = () => {
   const { trades } = useMarketStore();
@@ -43,7 +44,7 @@ export const TradeTape: React.FC = () => {
                 <span className={`font-medium ${isBuy ? "text-bid" : "text-ask"}`}>
                   {parseFloat(t.price).toLocaleString()}
                 </span>
-                <span className="text-right text-slate-300">{t.qty}</span>
+                <span className="text-right text-slate-300">{formatQty(t.qty)}</span>
                 <span className="text-right text-slate-500">{timeStr}</span>
               </div>
             );

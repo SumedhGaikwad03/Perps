@@ -70,6 +70,8 @@ export interface OpenOrder {
   filledQty: string;
   status: string;
   orderType?: "LIMIT" | "MARKET";
+  timeInForce?: "GTC" | "IOC" | "FOK";
+  reduceOnly?: boolean;
   createdAt?: string | number;
 }
 

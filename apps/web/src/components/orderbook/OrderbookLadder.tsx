@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { useMarketStore } from "../../stores/useMarketStore";
+import { formatQty } from "../../utils/format";
 
 interface OrderbookLadderProps {
   onSelectPrice?: (price: string) => void;
@@ -90,8 +91,8 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
                   style={{ width: `${depthPct}%` }}
                 />
                 <span className="relative z-10 text-ask font-medium">{ask.price}</span>
-                <span className="relative z-10 text-right text-slate-300">{ask.qty}</span>
-                <span className="relative z-10 text-right text-slate-400">{ask.total.toFixed(3)}</span>
+                <span className="relative z-10 text-right text-slate-300">{formatQty(ask.qty)}</span>
+                <span className="relative z-10 text-right text-slate-400">{formatQty(ask.total)}</span>
               </div>
             );
           })
@@ -132,8 +133,8 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
                   style={{ width: `${depthPct}%` }}
                 />
                 <span className="relative z-10 text-bid font-medium">{bid.price}</span>
-                <span className="relative z-10 text-right text-slate-300">{bid.qty}</span>
-                <span className="relative z-10 text-right text-slate-400">{bid.total.toFixed(3)}</span>
+                <span className="relative z-10 text-right text-slate-300">{formatQty(bid.qty)}</span>
+                <span className="relative z-10 text-right text-slate-400">{formatQty(bid.total)}</span>
               </div>
             );
           })

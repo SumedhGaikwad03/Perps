@@ -2,6 +2,7 @@ import React from "react";
 import { useUserStore } from "../../stores/useUserStore";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { orderService } from "../../services/api";
+import { formatQty } from "../../utils/format";
 
 export const PositionsTable: React.FC = () => {
   const { positions, fetchLiveUser } = useUserStore();
@@ -90,7 +91,7 @@ export const PositionsTable: React.FC = () => {
                     {pos.side} {pos.leverage}x
                   </span>
                 </td>
-                <td className="py-2 px-3 text-slate-200">{pos.qty}</td>
+                <td className="py-2 px-3 text-slate-200">{formatQty(pos.qty)}</td>
                 <td className="py-2 px-3 text-slate-300">
                   ${entryNum.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>

@@ -68,7 +68,7 @@ export const orderService = {
     marketId: string;
     orderType?: "LIMIT" | "MARKET";
     leverage?: string;
-    timeInForce?: "GTC" | "FOK";
+    timeInForce?: "GTC" | "FOK" | "IOC";
     reduceOnly?: boolean;
   }) => {
     const payload: any = {

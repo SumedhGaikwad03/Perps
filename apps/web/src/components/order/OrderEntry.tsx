@@ -12,6 +12,8 @@ interface OrderEntryProps {
 export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
   const [side, setSide] = useState<"BID" | "ASK">("BID");
   const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
+  const [timeInForce, setTimeInForce] = useState<"GTC" | "IOC" | "FOK">("GTC");
+  const [reduceOnly, setReduceOnly] = useState(false);
   const [price, setPrice] = useState("");
   const [qty, setQty] = useState("1");
   const [leverage, setLeverage] = useState("5");
@@ -91,6 +93,8 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
         price: orderType === "LIMIT" ? price : undefined,
         qty,
         leverage,
+        timeInForce,
+        reduceOnly,
       });
 
       if (res.result?.status === "CANCELLED" && (!res.result?.fills || res.result.fills.length === 0)) {
@@ -252,6 +256,47 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
             </div>
           </div>
 
+          {/* Time in Force Selector (GTC, IOC, FOK) */}
+          <div>
+            <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Time in Force</span>
+              <span className="font-mono text-[10px] text-accent font-semibold">{timeInForce}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-canvas p-1 border border-borderDark">
+              {(["GTC", "IOC", "FOK"] as const).map((tif) => (
+                <button
+                  key={tif}
+                  type="button"
+                  onClick={() => setTimeInForce(tif)}
+                  className={`rounded py-1 text-center font-mono text-[11px] font-semibold transition ${
+                    timeInForce === tif
+                      ? "bg-accent/20 text-accent font-bold border border-accent/40"
+                      : "text-slate-400 hover:bg-surface hover:text-white"
+                  }`}
+                >
+                  {tif}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Reduce Only Checkbox */}
+          <div className="flex items-center justify-between py-0.5">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300 hover:text-white transition">
+              <input
+                type="checkbox"
+                checked={reduceOnly}
+                onChange={(e) => setReduceOnly(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border border-borderDark bg-canvas text-accent accent-accent focus:ring-0 cursor-pointer"
+              />
+              <span className="font-semibold">Reduce Only</span>
+            </label>
+
+            <span className="text-[10px] text-slate-500 font-mono">
+              {reduceOnly ? "Position Exit Only" : "Normal Order"}
+            </span>
+          </div>
+
           {/* Margin Requirements Breakdown */}
           <div className="rounded-lg bg-canvas p-2.5 space-y-1.5 border border-borderDark font-mono text-[11px]">
             <div className="flex justify-between text-slate-400">
@@ -288,6 +333,8 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
           >
             {loading
               ? "Submitting to Engine..."
+              : reduceOnly
+              ? `${isLong ? "Reduce Long" : "Reduce Short"} ${qty} ${activeMarket?.baseToken || "BTC"}`
               : isLong
               ? `Open Long ${qty} ${activeMarket?.baseToken || "BTC"}`
               : `Open Short ${qty} ${activeMarket?.baseToken || "BTC"}`}

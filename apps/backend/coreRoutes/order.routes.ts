@@ -34,7 +34,7 @@ orderRouter.post(`/order`, authmiddleware, async (req: any, res) => {
       return res.status(400).json({ message: "Invalid orderType" });
     }
 
-    if (timeInForce !== "GTC" && timeInForce !== "FOK") {
+    if (timeInForce !== "GTC" && timeInForce !== "FOK" && timeInForce !== "IOC") {
       return res.status(400).json({ message: "Invalid timeInForce" });
     }
 

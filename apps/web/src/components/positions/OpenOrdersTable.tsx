@@ -2,6 +2,7 @@ import React from "react";
 import { useUserStore } from "../../stores/useUserStore";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { orderService } from "../../services/api";
+import { formatQty } from "../../utils/format";
 
 export const OpenOrdersTable: React.FC = () => {
   const { openOrders, fetchLiveUser } = useUserStore();
@@ -35,6 +36,7 @@ export const OpenOrdersTable: React.FC = () => {
             <th className="py-2 px-3">Price</th>
             <th className="py-2 px-3">Quantity</th>
             <th className="py-2 px-3">Filled</th>
+            <th className="py-2 px-3">TIF</th>
             <th className="py-2 px-3">Status</th>
             <th className="py-2 px-3 text-right">Action</th>
           </tr>
@@ -66,9 +68,21 @@ export const OpenOrdersTable: React.FC = () => {
                 <td className="py-2 px-3 text-slate-200">
                   ${priceNum > 0 ? priceNum.toLocaleString() : "MARKET"}
                 </td>
-                <td className="py-2 px-3 text-slate-300">{order.qty || "0"}</td>
+                <td className="py-2 px-3 text-slate-300">{formatQty(order.qty)}</td>
                 <td className="py-2 px-3 font-mono font-medium text-slate-200">
-                  {order.filledQty || "0"}
+                  {formatQty(order.filledQty)}
+                </td>
+                <td className="py-2 px-3">
+                  <div className="flex items-center gap-1 font-mono text-[10px]">
+                    <span className="rounded bg-surface px-1 py-0.5 text-slate-300 font-semibold">
+                      {order.timeInForce || "GTC"}
+                    </span>
+                    {order.reduceOnly && (
+                      <span className="rounded bg-amber-500/10 px-1 py-0.5 text-amber-400 font-bold" title="Reduce Only">
+                        RO
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="py-2 px-3">
                   <span
