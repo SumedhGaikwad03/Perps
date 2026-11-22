@@ -1,9 +1,9 @@
 import React from "react";
 import { useMarketStore } from "../../stores/useMarketStore";
-import { formatQty } from "../../utils/format";
+import { formatQty, formatPrice } from "../../utils/format";
 
 export const TradeTape: React.FC = () => {
-  const { trades } = useMarketStore();
+  const { trades, activeMarket } = useMarketStore();
 
   return (
     <div className="flex h-full flex-col bg-panel text-xs">
@@ -42,9 +42,11 @@ export const TradeTape: React.FC = () => {
                 className="grid grid-cols-3 px-3 py-0.5 font-mono text-[11px] hover:bg-surface"
               >
                 <span className={`font-medium ${isBuy ? "text-bid" : "text-ask"}`}>
-                  {parseFloat(t.price).toLocaleString()}
+                  {formatPrice(t.price, activeMarket?.tickSize)}
                 </span>
-                <span className="text-right text-slate-300">{formatQty(t.qty)}</span>
+                <span className="text-right text-slate-300">
+                  {formatQty(t.qty, activeMarket?.stepSize)}
+                </span>
                 <span className="text-right text-slate-500">{timeStr}</span>
               </div>
             );

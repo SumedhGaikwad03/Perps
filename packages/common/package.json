@@ -1,9 +1,8 @@
 {
   "name": "common",
   "module": "index.ts",
-
-  "export" : {
-    "./" : "index.ts"
+  "export": {
+    "./": "index.ts"
   },
   "type": "module",
   "private": true,
@@ -15,5 +14,8 @@
   },
   "peerDependencies": {
     "typescript": "^7"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0"
   }
 }

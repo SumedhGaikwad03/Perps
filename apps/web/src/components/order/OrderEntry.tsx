@@ -4,6 +4,8 @@ import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { useUserStore } from "../../stores/useUserStore";
 import { orderService } from "../../services/api";
+import { snapToTick, normalizeDecimal } from "../../utils/format";
+import Decimal from "decimal.js";
 
 interface OrderEntryProps {
   selectedPrice?: string | null;
@@ -21,23 +23,41 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const { activeMarket, markPrice } = useMarketStore();
+  const { activeMarket, markPrice, orderbook } = useMarketStore();
   const { isAuthenticated, wallet } = useAuthStore();
   const { fetchLiveUser } = useUserStore();
 
-  // If user clicks a row in the orderbook, prefill price
+  // If user clicks a row in the orderbook, prefill snapped price
   useEffect(() => {
-    if (selectedPrice) {
+    if (selectedPrice && activeMarket?.tickSize) {
+      setPrice(snapToTick(selectedPrice, activeMarket.tickSize));
+    } else if (selectedPrice) {
       setPrice(selectedPrice);
     }
-  }, [selectedPrice]);
+  }, [selectedPrice, activeMarket?.tickSize]);
 
-  // Default price to markPrice if empty
+  // Default price to snapped markPrice if empty
   useEffect(() => {
     if (!price && markPrice && parseFloat(markPrice) > 0) {
-      setPrice(markPrice);
+      const tick = activeMarket?.tickSize || "1";
+      setPrice(snapToTick(markPrice, tick));
     }
-  }, [markPrice]);
+  }, [markPrice, activeMarket?.tickSize]);
+
+  const handleMidClick = () => {
+    let midVal = markPrice || activeMarket?.markPrice || activeMarket?.lastTradedPrice || "89000";
+    const bestBid = orderbook.bids?.[0]?.[0];
+    const bestAsk = orderbook.asks?.[0]?.[0];
+    if (bestBid && bestAsk) {
+      try {
+        const dMid = new Decimal(bestBid).plus(bestAsk).dividedBy(2);
+        midVal = dMid.toString();
+      } catch {}
+    }
+    const tick = activeMarket?.tickSize || "1";
+    const snapped = snapToTick(midVal, tick);
+    setPrice(snapped);
+  };
 
   // Calculations: fallback to active market price if live stream has no ticks yet
   const currentMarkNum = parseFloat(markPrice || "0");
@@ -85,13 +105,16 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
     setError(null);
     setSuccess(null);
 
+    const finalPrice = orderType === "LIMIT" ? normalizeDecimal(price.trim()) : undefined;
+    const finalQty = normalizeDecimal(qty.trim());
+
     try {
       const res = await orderService.placeOrder({
         marketId: activeMarket.id,
         side,
         orderType,
-        price: orderType === "LIMIT" ? price : undefined,
-        qty,
+        price: finalPrice,
+        qty: finalQty,
         leverage,
         timeInForce,
         reduceOnly,
@@ -203,7 +226,7 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
                 />
                 <button
                   type="button"
-                  onClick={() => setPrice(markPrice || "89000")}
+                  onClick={handleMidClick}
                   className="absolute right-2 top-2 rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-white"
                 >
                   Mid

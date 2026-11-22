@@ -7,6 +7,7 @@ import {
 } from "../state";
 import { publisher } from "../streams/publisher";
 import { calculateRealizedPnl } from "./pnl";
+import Decimal from "decimal.js";
 
 // this function is used for update the position for the order
 export async function updatePositionFills(
@@ -60,47 +61,53 @@ export async function updatePositionFills(
     return;
   }
 
-  // the postion in that exists in the market is  then we can do this as
+  // the postion that exists in the market
   const existingQty = parseFloat(existingPosition.qty);
   const existingPrice = parseFloat(existingPosition.entryPrice);
   const existingMargin = parseFloat(existingPosition.margin);
 
-  // now we either add into the postion or dleverage the postion
+  const dExistingQty = new Decimal(existingPosition.qty);
+  const dIncomingQty = new Decimal(fillQty);
+  const dExistingPrice = new Decimal(existingPosition.entryPrice);
+  const dIncomingPrice = new Decimal(fillPrice);
+  const dExistingMargin = new Decimal(existingPosition.margin);
+  const dIncomingLeverage = new Decimal(leverage);
+
+  // now we either add into the postion or deleverage the postion
 
   if (existingPosition.side === side) {
-    // we double down on the existing postion as we make this we incerse the stakes in the project
-    const newQty = existingQty + incomingQty;
-    const avgEntryPrice =
-      (existingQty * existingPrice + incomingQty * incomingPrice) / newQty;
-    const addedMargin = (incomingQty * incomingPrice) / incomingLeverage;
-    const totalNewMargin = existingMargin + addedMargin;
-    const totalNotianoalValue = newQty * avgEntryPrice;
+    // we double down on the existing postion
+    const newQty = dExistingQty.plus(dIncomingQty);
+    const avgEntryPrice = dExistingQty
+      .times(dExistingPrice)
+      .plus(dIncomingQty.times(dIncomingPrice))
+      .dividedBy(newQty);
+    const addedMargin = dIncomingQty.times(dIncomingPrice).dividedBy(dIncomingLeverage);
+    const totalNewMargin = dExistingMargin.plus(addedMargin);
+    const totalNotionalValue = newQty.times(avgEntryPrice);
 
-    const blendedLeverage = totalNotianoalValue / totalNewMargin;
-
-    // now its time to set new postions here as
+    const blendedLeverage = totalNotionalValue.dividedBy(totalNewMargin);
 
     setPosition(posKey, {
       ...existingPosition,
       qty: newQty.toString(),
       entryPrice: avgEntryPrice.toString(),
-      margin: (existingMargin + addedMargin).toString(),
-      leverage: blendedLeverage.toFixed(2).toString(),
+      margin: totalNewMargin.toString(),
+      leverage: blendedLeverage.toFixed(2),
     });
     return;
   }
 
-  // now the flat pipeline for handing the opposing side of orders
+  // now the pipeline for handing the opposing side of orders
 
-  const closedQty = Math.min(existingQty, incomingQty);
-
-  const marginReduction = (closedQty / existingQty) * existingMargin;
+  const closedQty = Decimal.min(dExistingQty, dIncomingQty);
+  const marginReduction = closedQty.dividedBy(dExistingQty).times(dExistingMargin).toNumber();
 
   const realisedPnl = calculateRealizedPnl(
     existingPosition.side,
     existingPrice,
     incomingPrice,
-    closedQty,
+    closedQty.toNumber(),
   );
 
   const userBal = getOrCreateBalance(userId);
@@ -124,14 +131,14 @@ export async function updatePositionFills(
     }),
   });
 
-  // now time for sate mutation here as for postions as
-  if (incomingQty >= existingQty) {
+  // state mutation for positions using exact Decimal math
+  if (dIncomingQty.gte(dExistingQty)) {
     deletePosition(posKey); // delete the current position
 
-    const leftOverQty = incomingQty - existingQty;
+    const leftOverQty = dIncomingQty.minus(dExistingQty);
 
-    if (leftOverQty > 0) {
-      const leftOverMargin = (leftOverQty * incomingPrice) / incomingLeverage;
+    if (leftOverQty.gt(0)) {
+      const leftOverMargin = leftOverQty.times(dIncomingPrice).dividedBy(dIncomingLeverage);
 
       setPosition(posKey, {
         userId,
@@ -145,22 +152,19 @@ export async function updatePositionFills(
       });
     }
   } else {
-    // if the side is opposing but there are partial fills then what we can do is
-
-    const remainingQty = existingQty - incomingQty;
-
-    const remaingMargin = Math.max(0, existingMargin - marginReduction);
-
-    const remainigNotionalValue = remainingQty * existingPrice;
+    // opposing side partial fill
+    const remainingQty = dExistingQty.minus(dIncomingQty);
+    const remaingMargin = Decimal.max(0, dExistingMargin.minus(marginReduction));
+    const remainigNotionalValue = remainingQty.times(dExistingPrice);
 
     const currentLeverage =
-      remaingMargin > 0 ? remainigNotionalValue / remaingMargin : 0;
+      remaingMargin.gt(0) ? remainigNotionalValue.dividedBy(remaingMargin) : new Decimal(0);
 
     setPosition(posKey, {
       ...existingPosition,
       qty: remainingQty.toString(),
       margin: remaingMargin.toString(),
-      leverage: currentLeverage.toString(),
+      leverage: currentLeverage.toFixed(2),
     });
   }
 

@@ -68,9 +68,9 @@ export const OpenOrdersTable: React.FC = () => {
                 <td className="py-2 px-3 text-slate-200">
                   ${priceNum > 0 ? priceNum.toLocaleString() : "MARKET"}
                 </td>
-                <td className="py-2 px-3 text-slate-300">{formatQty(order.qty)}</td>
+                <td className="py-2 px-3 text-slate-300">{formatQty(order.qty, marketObj?.stepSize)}</td>
                 <td className="py-2 px-3 font-mono font-medium text-slate-200">
-                  {formatQty(order.filledQty)}
+                  {formatQty(order.filledQty, marketObj?.stepSize)}
                 </td>
                 <td className="py-2 px-3">
                   <div className="flex items-center gap-1 font-mono text-[10px]">

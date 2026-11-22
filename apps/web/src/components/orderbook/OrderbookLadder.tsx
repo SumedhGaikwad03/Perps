@@ -1,25 +1,26 @@
 import React, { useMemo } from "react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { formatQty } from "../../utils/format";
+import Decimal from "decimal.js";
 
 interface OrderbookLadderProps {
   onSelectPrice?: (price: string) => void;
 }
 
 export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice }) => {
-  const { orderbook, markPrice } = useMarketStore();
+  const { orderbook, markPrice, activeMarket } = useMarketStore();
 
   // Process and sort asks (ascending by price, then take top 12 reversed for display)
   const processedAsks = useMemo(() => {
     const raw = [...(orderbook.asks || [])];
-    raw.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+    raw.sort((a, b) => new Decimal(a[0]).minus(b[0]).toNumber());
     const sliced = raw.slice(0, 12);
 
-    let runningTotal = 0;
+    let runningTotal = new Decimal(0);
     const withTotals = sliced.map(([p, q]) => {
-      const qtyNum = parseFloat(q);
-      runningTotal += qtyNum;
-      return { price: p, qty: q, total: runningTotal };
+      const dQty = new Decimal(q || 0);
+      runningTotal = runningTotal.plus(dQty);
+      return { price: p, qty: q, total: runningTotal.toString() };
     });
 
     // reverse for visual ladder (highest ask at top, best ask nearest spread)
@@ -29,31 +30,31 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
   // Process and sort bids (descending by price, best bid nearest spread)
   const processedBids = useMemo(() => {
     const raw = [...(orderbook.bids || [])];
-    raw.sort((a, b) => parseFloat(b[0]) - parseFloat(a[0]));
+    raw.sort((a, b) => new Decimal(b[0]).minus(a[0]).toNumber());
     const sliced = raw.slice(0, 12);
 
-    let runningTotal = 0;
+    let runningTotal = new Decimal(0);
     return sliced.map(([p, q]) => {
-      const qtyNum = parseFloat(q);
-      runningTotal += qtyNum;
-      return { price: p, qty: q, total: runningTotal };
+      const dQty = new Decimal(q || 0);
+      runningTotal = runningTotal.plus(dQty);
+      return { price: p, qty: q, total: runningTotal.toString() };
     });
   }, [orderbook.bids]);
 
   // Compute maximum depth total for bar scaling
   const maxTotal = useMemo(() => {
-    const maxAsk = processedAsks.length > 0 ? processedAsks[0]?.total || 1 : 1;
+    const maxAsk = processedAsks.length > 0 ? parseFloat(processedAsks[0]?.total || "1") : 1;
     const maxBid =
       processedBids.length > 0
-        ? processedBids[processedBids.length - 1]?.total || 1
+        ? parseFloat(processedBids[processedBids.length - 1]?.total || "1")
         : 1;
     return Math.max(maxAsk, maxBid, 1);
   }, [processedAsks, processedBids]);
 
-  // Spread calculation
-  const bestAsk = processedAsks.length > 0 ? parseFloat(processedAsks[processedAsks.length - 1]!.price) : 0;
-  const bestBid = processedBids.length > 0 ? parseFloat(processedBids[0]!.price) : 0;
-  const spread = bestAsk > 0 && bestBid > 0 ? (bestAsk - bestBid).toFixed(2) : "0.00";
+  // Spread calculation using Decimal
+  const bestAsk = processedAsks.length > 0 ? new Decimal(processedAsks[processedAsks.length - 1]!.price) : null;
+  const bestBid = processedBids.length > 0 ? new Decimal(processedBids[0]!.price) : null;
+  const spread = bestAsk && bestBid ? bestAsk.minus(bestBid).toString() : "0.00";
 
   return (
     <div className="flex h-full flex-col bg-panel text-xs">
@@ -78,7 +79,7 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
           </div>
         ) : (
           processedAsks.map((ask) => {
-            const depthPct = Math.min(100, (ask.total / maxTotal) * 100);
+            const depthPct = Math.min(100, (parseFloat(ask.total) / maxTotal) * 100);
             return (
               <div
                 key={`ask-${ask.price}`}
@@ -91,8 +92,8 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
                   style={{ width: `${depthPct}%` }}
                 />
                 <span className="relative z-10 text-ask font-medium">{ask.price}</span>
-                <span className="relative z-10 text-right text-slate-300">{formatQty(ask.qty)}</span>
-                <span className="relative z-10 text-right text-slate-400">{formatQty(ask.total)}</span>
+                <span className="relative z-10 text-right text-slate-300">{formatQty(ask.qty, activeMarket?.stepSize)}</span>
+                <span className="relative z-10 text-right text-slate-400">{formatQty(ask.total, activeMarket?.stepSize)}</span>
               </div>
             );
           })
@@ -120,7 +121,7 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
           </div>
         ) : (
           processedBids.map((bid) => {
-            const depthPct = Math.min(100, (bid.total / maxTotal) * 100);
+            const depthPct = Math.min(100, (parseFloat(bid.total) / maxTotal) * 100);
             return (
               <div
                 key={`bid-${bid.price}`}
@@ -133,8 +134,8 @@ export const OrderbookLadder: React.FC<OrderbookLadderProps> = ({ onSelectPrice 
                   style={{ width: `${depthPct}%` }}
                 />
                 <span className="relative z-10 text-bid font-medium">{bid.price}</span>
-                <span className="relative z-10 text-right text-slate-300">{formatQty(bid.qty)}</span>
-                <span className="relative z-10 text-right text-slate-400">{formatQty(bid.total)}</span>
+                <span className="relative z-10 text-right text-slate-300">{formatQty(bid.qty, activeMarket?.stepSize)}</span>
+                <span className="relative z-10 text-right text-slate-400">{formatQty(bid.total, activeMarket?.stepSize)}</span>
               </div>
             );
           })

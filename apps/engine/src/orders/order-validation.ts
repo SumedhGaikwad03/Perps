@@ -1,5 +1,6 @@
 import type { toEngine } from "common";
 import type { OrderBook, Position } from "../types";
+import Decimal from "decimal.js";
 
 export type OrderValidationResult =
   | { isValid: true }
@@ -48,31 +49,53 @@ export function validateOrderParams(
   }
 
   if (book.stepSize) {
-    const step = parseFloat(book.stepSize);
-    if (numQty < step) {
+    try {
+      const dQty = new Decimal(command.qty);
+      const dStep = new Decimal(book.stepSize);
+      if (dStep.gt(0)) {
+        if (dQty.lt(dStep)) {
+          return {
+            isValid: false,
+            error: "QTY_BELOW_STEP_SIZE",
+            data: "",
+          };
+        }
+        const rem = dQty.mod(dStep);
+        if (!rem.isZero() && rem.abs().gt("1e-12") && dStep.minus(rem.abs()).gt("1e-12")) {
+          return {
+            isValid: false,
+            error: "QTY_NOT_MULTIPLE_OF_STEP_SIZE",
+            data: "",
+          };
+        }
+      }
+    } catch {
       return {
         isValid: false,
-        error: "QTY_BELOW_STEP_SIZE",
-        data: "",
-      };
-    }
-    const stepMultiple = numQty / step;
-    if (Math.abs(stepMultiple - Math.round(stepMultiple)) > 1e-5) {
-      return {
-        isValid: false,
-        error: "QTY_NOT_MULTIPLE_OF_STEP_SIZE",
+        error: "INVAILD_PRICE_OR_QTY",
         data: "",
       };
     }
   }
 
   if (orderType === "LIMIT" && price && book.tickSize) {
-    const tick = parseFloat(book.tickSize);
-    const tickMultiple = numPrice / tick;
-    if (Math.abs(tickMultiple - Math.round(tickMultiple)) > 1e-5) {
+    try {
+      const dPrice = new Decimal(price);
+      const dTick = new Decimal(book.tickSize);
+      if (dTick.gt(0)) {
+        const rem = dPrice.mod(dTick);
+        if (!rem.isZero() && rem.abs().gt("1e-12") && dTick.minus(rem.abs()).gt("1e-12")) {
+          return {
+            isValid: false,
+            error: "PRICE_NOT_MULTIPLE_OF_TICK_SIZE",
+            data: "",
+          };
+        }
+      }
+    } catch {
       return {
         isValid: false,
-        error: "PRICE_NOT_MULTIPLE_OF_TICK_SIZE",
+        error: "INVAILD_PRICE_OR_QTY",
         data: "",
       };
     }
