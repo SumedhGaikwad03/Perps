@@ -43,4 +43,5 @@ export interface Position {
   entryPrice: string;
   margin: string;
   leverage: string;
+  liquidationPrice?: string | null;
 }

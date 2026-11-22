@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon, PlusCircle } from "lucide-react";
+import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon, PlusCircle, PieChart } from "lucide-react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { wsManager } from "../../services/websocket";
@@ -7,8 +7,19 @@ import { AuthModal } from "../modals/AuthModal";
 import { DepositModal } from "../modals/DepositModal";
 import { CreateMarketModal } from "../modals/CreateMarketModal";
 
-export const Header: React.FC = () => {
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+interface HeaderProps {
+  activePage?: "live" | "markets" | "portfolio";
+  onNavigate?: (page: "live" | "markets" | "portfolio") => void;
+  onOpenCreateMarket?: () => void;
+  onOpenDeposit?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  activePage = "live",
+  onNavigate,
+  onOpenCreateMarket,
+  onOpenDeposit,
+}) => {
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false);
   const [isMarketDropdownOpen, setIsMarketDropdownOpen] = useState(false);
@@ -18,7 +29,7 @@ export const Header: React.FC = () => {
   const [fundingRate, setFundingRate] = useState("+0.0100%");
 
   const { markets, activeMarket, setActiveMarket, markPrice } = useMarketStore();
-  const { user, wallet, isAuthenticated, logout } = useAuthStore();
+  const { user, wallet, isAuthenticated, logout, isAuthModalOpen, openAuthModal, closeAuthModal } = useAuthStore();
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -83,6 +94,49 @@ export const Header: React.FC = () => {
 
           <div className="h-4 w-px bg-borderDark shrink-0" />
 
+          {/* Top-Level Page Navigation Links: Live Terminal & Markets */}
+          <div className="flex items-center gap-1 rounded-lg bg-canvas p-0.5 border border-borderDark shrink-0">
+            <button
+              onClick={() => onNavigate?.("live")}
+              className={`rounded px-2.5 py-1 text-xs font-bold transition flex items-center gap-1.5 ${
+                activePage === "live"
+                  ? "bg-accent text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${activePage === "live" ? "bg-emerald-400" : "bg-slate-500"}`} />
+              <span>Live Terminal</span>
+            </button>
+
+            <button
+              onClick={() => onNavigate?.("markets")}
+              className={`rounded px-2.5 py-1 text-xs font-bold transition flex items-center gap-1.5 ${
+                activePage === "markets"
+                  ? "bg-accent text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span>Markets</span>
+              <span className="rounded bg-surface px-1 text-[10px] text-slate-300 font-mono">
+                {markets.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => onNavigate?.("portfolio")}
+              className={`rounded px-2.5 py-1 text-xs font-bold transition flex items-center gap-1.5 ${
+                activePage === "portfolio"
+                  ? "bg-accent text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <PieChart className="h-3 w-3" />
+              <span>Portfolio</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-borderDark shrink-0" />
+
           {/* Market Dropdown + Add Market Button */}
           <div className="flex items-center gap-1.5 shrink-0">
             <div className="relative">
@@ -122,7 +176,8 @@ export const Header: React.FC = () => {
                     <button
                       onClick={() => {
                         setIsMarketDropdownOpen(false);
-                        setIsCreateMarketOpen(true);
+                        if (onOpenCreateMarket) onOpenCreateMarket();
+                        else setIsCreateMarketOpen(true);
                       }}
                       className="flex w-full items-center justify-center gap-1.5 rounded-md bg-accent/10 px-2 py-1.5 text-xs font-semibold text-accent hover:bg-accent hover:text-white transition"
                     >
@@ -136,7 +191,10 @@ export const Header: React.FC = () => {
 
             {/* Quick Add Market Button */}
             <button
-              onClick={() => setIsCreateMarketOpen(true)}
+              onClick={() => {
+                if (onOpenCreateMarket) onOpenCreateMarket();
+                else setIsCreateMarketOpen(true);
+              }}
               title="Add New Perpetual Market"
               className="flex items-center gap-1 rounded-lg border border-borderDark bg-canvas px-2 py-1 text-xs font-semibold text-slate-300 hover:border-accent hover:text-accent transition"
             >
@@ -188,13 +246,23 @@ export const Header: React.FC = () => {
             <>
               {/* Collateral Balance Pill */}
               <div className="flex items-center gap-2 rounded-lg border border-borderDark bg-canvas px-3 py-1 text-xs">
-                <Wallet className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-400">Avail:</span>
-                <span className="font-mono font-bold text-white">
-                  ${parseFloat(wallet.amountAvail || "0").toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </span>
                 <button
-                  onClick={() => setIsDepositOpen(true)}
+                  type="button"
+                  onClick={() => onNavigate?.("portfolio")}
+                  title="View Portfolio & Margin"
+                  className="flex items-center gap-1.5 hover:text-white transition"
+                >
+                  <Wallet className="h-3.5 w-3.5 text-accent" />
+                  <span className="text-slate-400">Avail:</span>
+                  <span className="font-mono font-bold text-white">
+                    ${parseFloat(wallet.amountAvail || "0").toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (onOpenDeposit) onOpenDeposit();
+                    else setIsDepositOpen(true);
+                  }}
                   title="Deposit Collateral"
                   className="flex h-5 w-5 items-center justify-center rounded bg-accent/20 text-accent transition hover:bg-accent hover:text-white"
                 >
@@ -218,7 +286,7 @@ export const Header: React.FC = () => {
             </>
           ) : (
             <button
-              onClick={() => setIsAuthOpen(true)}
+              onClick={openAuthModal}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-accent/20 transition hover:bg-blue-600"
             >
               <UserIcon className="h-3.5 w-3.5" />
@@ -229,7 +297,7 @@ export const Header: React.FC = () => {
       </header>
 
       {/* Modals */}
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} />
       <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
       <CreateMarketModal isOpen={isCreateMarketOpen} onClose={() => setIsCreateMarketOpen(false)} />
     </>

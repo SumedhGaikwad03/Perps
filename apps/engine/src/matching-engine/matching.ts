@@ -260,7 +260,7 @@ export async function executeMatchingFunction(
       } else {
         // update maker resting order in redis open_orders mirror with new filledQty and status
         publisher.hSet(
-          `open_orders:${restingOrder.userId}`,
+          `user:${restingOrder.userId}:open_orders`,
           restingOrder.originalOrderId,
           JSON.stringify({
             orderId: restingOrder.originalOrderId,
@@ -384,6 +384,20 @@ export async function executeMatchingFunction(
 
       const currentPosition = getPosition(posKey);
 
+      let liqPriceStr: string | null = null;
+      if (currentPosition) {
+        const entry = Number(currentPosition.entryPrice || 0);
+        const lev = Number(currentPosition.leverage || 1);
+        const mmr = 0.03;
+        if (entry > 0 && lev > 0) {
+          const liq =
+            currentPosition.side === "LONG"
+              ? Math.max(0, entry * (1 - 1 / lev + mmr))
+              : entry * (1 + 1 / lev - mmr);
+          liqPriceStr = liq.toFixed(2);
+        }
+      }
+
       // if the postion exist then we can just push that current postion to the db if the postion does not exist then that means
       // the postionn was deleted by the in memory array so we just update the size of the postion to be zero
       const payload = currentPosition
@@ -396,7 +410,7 @@ export async function executeMatchingFunction(
                 : `-${currentPosition?.qty}`,
             entryPrice: currentPosition?.entryPrice,
             leverage: Number(currentPosition?.leverage),
-            liquidationPrice: null,
+            liquidationPrice: liqPriceStr,
           }
         : {
             userId: affectedUserId,
@@ -591,12 +605,15 @@ export async function executeMatchingFunction(
     payload: JSON.stringify(OrderAcceptedPayload),
   });
 
-  if (orderType === "LIMIT" && dRemaningQty.gt(0)) {
+  if (orderType === "LIMIT" && command.timeInForce === "GTC" && dRemaningQty.gt(0)) {
     MirrorOpenOrder({
       ...OrderAcceptedPayload,
       filledQty: executedQtyStr,
       status: dExecutedQty.gt(0) ? "PARTIALLY_FILLED" : "OPEN",
     } as any);
+  } else {
+    // If order was IOC, FOK, MARKET, or 100% FILLED, ensure it does not sit in open_orders mirror
+    DeleteMirrordOpenOrder(userId, orderId);
   }
 
   await publisher.xAdd("db-events", "*", {

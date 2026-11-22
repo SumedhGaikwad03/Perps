@@ -50,6 +50,7 @@ export interface Position {
   userId?: string;
   marketId: string;
   symbol?: string;
+  baseToken?: string;
   side: "LONG" | "SHORT";
   qty: string;
   entryPrice: string;

@@ -9,6 +9,21 @@ import { publisher } from "../streams/publisher";
 import { calculateRealizedPnl } from "./pnl";
 import Decimal from "decimal.js";
 
+function computeLiquidationPrice(
+  side: "LONG" | "SHORT",
+  entryPrice: number | string,
+  leverage: number | string
+): string | null {
+  const entry = Number(entryPrice);
+  const lev = Number(leverage);
+  const mmr = 0.03;
+  if (entry <= 0 || lev <= 0) return null;
+  const liq = side === "LONG"
+    ? Math.max(0, entry * (1 - 1 / lev + mmr))
+    : entry * (1 + 1 / lev - mmr);
+  return liq.toFixed(2);
+}
+
 // this function is used for update the position for the order
 export async function updatePositionFills(
   userId: string,
@@ -56,6 +71,7 @@ export async function updatePositionFills(
       entryPrice: fillPrice,
       margin: margin,
       leverage: leverage,
+      liquidationPrice: computeLiquidationPrice(side, fillPrice, leverage),
     });
 
     return;
@@ -88,12 +104,14 @@ export async function updatePositionFills(
 
     const blendedLeverage = totalNotionalValue.dividedBy(totalNewMargin);
 
+    const blendedLevStr = blendedLeverage.toFixed(2);
     setPosition(posKey, {
       ...existingPosition,
       qty: newQty.toString(),
       entryPrice: avgEntryPrice.toString(),
       margin: totalNewMargin.toString(),
-      leverage: blendedLeverage.toFixed(2),
+      leverage: blendedLevStr,
+      liquidationPrice: computeLiquidationPrice(existingPosition.side, avgEntryPrice.toString(), blendedLevStr),
     });
     return;
   }
@@ -149,6 +167,7 @@ export async function updatePositionFills(
         margin: leftOverMargin.toString(),
         leverage,
         entryPrice: fillPrice,
+        liquidationPrice: computeLiquidationPrice(side, fillPrice, leverage),
       });
     }
   } else {
@@ -160,11 +179,13 @@ export async function updatePositionFills(
     const currentLeverage =
       remaingMargin.gt(0) ? remainigNotionalValue.dividedBy(remaingMargin) : new Decimal(0);
 
+    const currentLevStr = currentLeverage.toFixed(2);
     setPosition(posKey, {
       ...existingPosition,
       qty: remainingQty.toString(),
       margin: remaingMargin.toString(),
-      leverage: currentLeverage.toFixed(2),
+      leverage: currentLevStr,
+      liquidationPrice: computeLiquidationPrice(existingPosition.side, existingPosition.entryPrice, currentLevStr),
     });
   }
 

@@ -156,6 +156,57 @@ marketRouter.get("/markets", async (_req, res) => {
   }
 });
 
+// Live system and markets status endpoint
+marketRouter.get("/live", async (_req, res) => {
+  try {
+    const markets = await prisma.market.findMany({
+      orderBy: { symbol: "asc" },
+    });
+
+    const liveData = await Promise.all(
+      markets.map(async (m) => {
+        const rawDepth = await redisClient.hGet(`market:${m.id}:depth`, "data");
+        const depth = rawDepth ? JSON.parse(rawDepth) : null;
+        const lastTradedPrice = depth ? depth.lastTradedPrice : "0";
+        const rawMarkPrice =
+          (await redisClient.hGet("market:markPrices", m.baseToken)) ||
+          (await redisClient.hGet(`market:${m.id}:markPrice`, "data")) ||
+          (depth?.markPrice ? String(depth.markPrice) : undefined);
+        const markPrice = rawMarkPrice && parseFloat(rawMarkPrice) > 0 ? rawMarkPrice : (lastTradedPrice || "0");
+
+        return {
+          id: m.id,
+          symbol: m.symbol,
+          baseToken: m.baseToken,
+          markPrice,
+          lastTradedPrice,
+          tickSize: m.tickSize,
+          stepSize: m.stepSize,
+          status: "TRADING",
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      status: "ONLINE",
+      timestamp: Date.now(),
+      activeMarketsCount: markets.length,
+      markets: liveData,
+    });
+  } catch (error) {
+    console.error("Error in /live:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error fetching live status",
+    });
+  }
+});
+
+marketRouter.get("/markets/live", async (_req, res) => {
+  return res.redirect(307, "/api/v1/live");
+});
+
 
 marketRouter.post("/admin/market", adminMiddleWare, async (req, res) => {
   try {

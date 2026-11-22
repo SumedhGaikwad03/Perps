@@ -55,6 +55,7 @@ export const useUserStore = create<UserState>((set) => ({
               positionsList.push({
                 marketId: parsed.marketId,
                 symbol: parsed.symbol,
+                baseToken: parsed.baseToken,
                 side: parsed.side || (parseFloat(parsed.qty) > 0 ? "LONG" : "SHORT"),
                 qty: String(parsed.qty),
                 entryPrice: String(parsed.entryPrice || "0"),
@@ -75,6 +76,14 @@ export const useUserStore = create<UserState>((set) => ({
           try {
             const parsed = typeof orderData === "string" ? JSON.parse(orderData) : orderData;
             if (parsed) {
+              const status = parsed.status || "OPEN";
+              const filledNum = parseFloat(parsed.filledQty ?? parsed.executeQty ?? "0");
+              const qtyNum = parseFloat(parsed.qty || "0");
+
+              // Skip orders that are completed or cancelled
+              if (status === "FILLED" || status === "CANCELLED") continue;
+              if (qtyNum > 0 && filledNum >= qtyNum) continue;
+
               ordersList.push({
                 orderId: parsed.orderId || parsed.id,
                 marketId: parsed.marketId,
@@ -82,9 +91,11 @@ export const useUserStore = create<UserState>((set) => ({
                 side: parsed.side || parsed.orderSide || "BID",
                 price: String(parsed.price),
                 qty: String(parsed.qty),
-                filledQty: String(parsed.filledQty ?? parsed.executeQty ?? "0"),
-                status: parsed.status || (parsed.filledQty && parseFloat(parsed.filledQty) > 0 ? "PARTIALLY_FILLED" : "OPEN"),
+                filledQty: String(filledNum),
+                status: filledNum > 0 ? "PARTIALLY_FILLED" : "OPEN",
                 orderType: parsed.orderType || "LIMIT",
+                timeInForce: parsed.timeInForce || "GTC",
+                reduceOnly: Boolean(parsed.reduceOnly),
                 createdAt: parsed.createdAt,
               });
             }

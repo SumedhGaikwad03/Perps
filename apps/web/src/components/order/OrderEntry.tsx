@@ -24,8 +24,24 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
   const [success, setSuccess] = useState<string | null>(null);
 
   const { activeMarket, markPrice, orderbook } = useMarketStore();
-  const { isAuthenticated, wallet } = useAuthStore();
-  const { fetchLiveUser } = useUserStore();
+  const { isAuthenticated, wallet, openAuthModal } = useAuthStore();
+  const { positions, fetchLiveUser } = useUserStore();
+
+  // Find active position for the selected market
+  const activeMarketPosition = positions.find((p) => {
+    const marketIdStr = String(p.marketId || "");
+    const posSymbol = (p.symbol || "").toUpperCase();
+    const activeSymbol = (activeMarket?.symbol || "").toUpperCase();
+    const posBase = (p.baseToken || "").toUpperCase();
+    const activeBase = (activeMarket?.baseToken || "").toUpperCase();
+
+    return (
+      marketIdStr === activeMarket?.id ||
+      posSymbol === activeSymbol ||
+      (posBase && activeBase && posBase === activeBase) ||
+      (posSymbol.includes("BTC") && activeSymbol.includes("BTC"))
+    );
+  });
 
   // If user clicks a row in the orderbook, prefill snapped price
   useEffect(() => {
@@ -71,7 +87,8 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
   const numericLev = parseFloat(leverage || "1");
 
   const notional = effectivePrice * numericQty;
-  const initialMargin = numericLev > 0 ? notional / numericLev : 0;
+  // Reduce Only orders require $0 initial margin because they close/reduce an existing position
+  const initialMargin = reduceOnly ? 0 : (numericLev > 0 ? notional / numericLev : 0);
 
   // Est. Liquidation Price: Price * (1 - (1/Lev) + MMR) for Long, Price * (1 + (1/Lev) - MMR) for Short
   const mmr = 0.03; // 3% maintenance margin
@@ -82,10 +99,51 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
         : effectivePrice * (1 + 1 / numericLev - mmr)
       : 0;
 
+  // Quick percentage sizing: if reduceOnly and position exists, size from position; otherwise from available margin
+  const handlePercentageSize = (pct: number) => {
+    const step = parseFloat(activeMarket?.stepSize || "0.001");
+    const decimals = step < 1 ? (step.toString().split(".")[1] || "").length : 0;
+
+    if (reduceOnly && activeMarketPosition) {
+      const posQty = parseFloat(activeMarketPosition.qty || "0");
+      if (posQty > 0) {
+        setQty((posQty * pct).toFixed(decimals));
+        return;
+      }
+    }
+
+    const availBal = parseFloat(wallet.amountAvail || "0");
+    if (availBal <= 0 || effectivePrice <= 0) return;
+    const lev = Math.max(1, parseFloat(leverage || "1"));
+    const targetMargin = availBal * pct;
+    const targetNotional = targetMargin * lev;
+    const calcQty = targetNotional / effectivePrice;
+    setQty(calcQty.toFixed(decimals));
+  };
+
+  const isLong = side === "BID";
+
+  // Direction validation for Reduce Only
+  const isReduceDirectionInvalid =
+    reduceOnly &&
+    (!activeMarketPosition ||
+      (activeMarketPosition.side === "SHORT" && !isLong) ||
+      (activeMarketPosition.side === "LONG" && isLong));
+
+  const reduceDirectionError = !activeMarketPosition
+    ? `No active ${activeMarket?.symbol || "BTC_USDC"} position found to reduce.`
+    : activeMarketPosition.side === "SHORT" && !isLong
+    ? "You hold a SHORT position. Switch to Long / Buy to reduce it."
+    : activeMarketPosition.side === "LONG" && isLong
+    ? "You hold a LONG position. Switch to Short / Sell to reduce it."
+    : null;
+
+  const isMarginExceeded = !reduceOnly && initialMargin > parseFloat(wallet.amountAvail || "0");
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAuthenticated) {
-      setError("Please sign in to place orders.");
+      openAuthModal();
       return;
     }
     if (!activeMarket) {
@@ -98,6 +156,19 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
     }
     if (orderType === "LIMIT" && parseFloat(price || "0") <= 0) {
       setError("Price must be greater than 0 for Limit orders.");
+      return;
+    }
+
+    if (reduceOnly && isReduceDirectionInvalid) {
+      setError(reduceDirectionError || "Cannot place reduce-only order: invalid direction.");
+      return;
+    }
+
+    const availBal = parseFloat(wallet.amountAvail || "0");
+    if (!reduceOnly && initialMargin > availBal) {
+      setError(
+        `Insufficient available margin ($${availBal.toLocaleString(undefined, { maximumFractionDigits: 2 })} available, $${initialMargin.toLocaleString(undefined, { maximumFractionDigits: 2 })} required). Deposit funds or reduce order size.`
+      );
       return;
     }
 
@@ -138,8 +209,6 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
       setLoading(false);
     }
   };
-
-  const isLong = side === "BID";
 
   return (
     <div className="flex h-full flex-col bg-panel p-3 text-xs overflow-y-auto min-h-0">
@@ -254,6 +323,22 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
                 {activeMarket?.baseToken || "BTC"}
               </span>
             </div>
+
+            {/* Quick Sizing Buttons */}
+            <div className="grid grid-cols-4 gap-1 mt-1.5 font-mono text-[10px]">
+              {[0.25, 0.5, 0.75, 1.0].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => handlePercentageSize(pct)}
+                  className="rounded bg-canvas border border-borderDark py-0.5 text-slate-400 hover:border-accent hover:text-white transition"
+                >
+                  {reduceOnly && activeMarketPosition
+                    ? pct === 1.0 ? "100%" : `${pct * 100}%`
+                    : pct === 1.0 ? "Max" : `${pct * 100}%`}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Leverage Slider */}
@@ -303,21 +388,56 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
             </div>
           </div>
 
-          {/* Reduce Only Checkbox */}
-          <div className="flex items-center justify-between py-0.5">
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300 hover:text-white transition">
-              <input
-                type="checkbox"
-                checked={reduceOnly}
-                onChange={(e) => setReduceOnly(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border border-borderDark bg-canvas text-accent accent-accent focus:ring-0 cursor-pointer"
-              />
-              <span className="font-semibold">Reduce Only</span>
-            </label>
+          {/* Reduce Only Control Panel */}
+          <div className="rounded-lg bg-canvas border border-borderDark p-2 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-200 hover:text-white transition">
+                <input
+                  type="checkbox"
+                  checked={reduceOnly}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setReduceOnly(checked);
+                    if (checked && activeMarketPosition) {
+                      setSide(activeMarketPosition.side === "SHORT" ? "BID" : "ASK");
+                      const step = parseFloat(activeMarket?.stepSize || "0.001");
+                      const decimals = step < 1 ? (step.toString().split(".")[1] || "").length : 0;
+                      setQty(parseFloat(activeMarketPosition.qty).toFixed(decimals));
+                    }
+                  }}
+                  className="h-3.5 w-3.5 rounded border border-borderDark bg-surface text-accent accent-accent focus:ring-0 cursor-pointer"
+                />
+                <span className="font-bold">Reduce Only</span>
+              </label>
 
-            <span className="text-[10px] text-slate-500 font-mono">
-              {reduceOnly ? "Position Exit Only" : "Normal Order"}
-            </span>
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                  reduceOnly
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "text-slate-500"
+                }`}
+              >
+                {reduceOnly ? "No locked balance needed" : "Normal Order"}
+              </span>
+            </div>
+
+            {reduceOnly && (
+              <div className="text-[10px] text-slate-400 border-t border-borderDark/40 pt-1.5 flex items-center justify-between">
+                <span>Position to Close:</span>
+                {activeMarketPosition ? (
+                  <span className="font-mono font-bold text-white flex items-center gap-1.5">
+                    <span className={activeMarketPosition.side === "LONG" ? "text-bid" : "text-ask"}>
+                      {activeMarketPosition.side}
+                    </span>
+                    <span>
+                      {activeMarketPosition.qty} {activeMarket?.baseToken || "BTC"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-amber-400 font-mono">None (0.00)</span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Margin Requirements Breakdown */}
@@ -326,14 +446,30 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
               <span>Notional Value</span>
               <span className="text-white">${notional.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
             </div>
+
             <div className="flex justify-between text-slate-400">
               <span>Initial Margin</span>
-              <span className="text-white">${initialMargin.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              {reduceOnly ? (
+                <span className="text-bid font-bold flex items-center gap-1">
+                  $0.00 <span className="text-[10px] text-emerald-400 font-normal font-sans">(No locked balance needed)</span>
+                </span>
+              ) : (
+                <span className={isMarginExceeded ? "text-ask font-bold" : "text-white"}>
+                  ${initialMargin.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  {isMarginExceeded && " (Exceeds Avail)"}
+                </span>
+              )}
             </div>
+
             <div className="flex justify-between text-slate-400">
               <span>Est. Liq Price</span>
-              <span className="text-ask">${estLiqPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              {reduceOnly ? (
+                <span className="text-slate-400 font-mono">— (Closing Position)</span>
+              ) : (
+                <span className="text-ask">${estLiqPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              )}
             </div>
+
             <div className="flex justify-between border-t border-borderDark/60 pt-1 text-slate-400">
               <span>Available Margin</span>
               <span className="text-slate-200">
@@ -343,25 +479,56 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
           </div>
         </div>
 
+        {/* Reduce Only Direction Warning */}
+        {reduceOnly && isReduceDirectionInvalid && (
+          <div className="mt-1 rounded bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 text-[11px] text-amber-400">
+            {reduceDirectionError}
+          </div>
+        )}
+
         {/* Submit Order Button */}
         <div className="mt-2 shrink-0 pb-1">
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full rounded-lg py-2.5 text-sm font-bold shadow-lg transition disabled:opacity-50 ${
-              isLong
-                ? "bg-bid text-black shadow-bid/20 hover:bg-emerald-400"
-                : "bg-ask text-white shadow-ask/20 hover:bg-red-600"
-            }`}
-          >
-            {loading
-              ? "Submitting to Engine..."
-              : reduceOnly
-              ? `${isLong ? "Reduce Long" : "Reduce Short"} ${qty} ${activeMarket?.baseToken || "BTC"}`
-              : isLong
-              ? `Open Long ${qty} ${activeMarket?.baseToken || "BTC"}`
-              : `Open Short ${qty} ${activeMarket?.baseToken || "BTC"}`}
-          </button>
+          {!isAuthenticated ? (
+            <button
+              type="button"
+              onClick={openAuthModal}
+              className="w-full rounded-lg py-2.5 text-sm font-bold shadow-lg transition bg-accent text-white shadow-accent/20 hover:bg-blue-600"
+            >
+              Sign In to Trade
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={loading || (reduceOnly ? isReduceDirectionInvalid : isMarginExceeded)}
+              className={`w-full rounded-lg py-2.5 text-sm font-bold shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                reduceOnly && isReduceDirectionInvalid
+                  ? "bg-slate-700 text-amber-300 border border-amber-500/30"
+                  : isMarginExceeded
+                  ? "bg-slate-700 text-slate-400 border border-slate-600"
+                  : isLong
+                  ? "bg-bid text-black shadow-bid/20 hover:bg-emerald-400"
+                  : "bg-ask text-white shadow-ask/20 hover:bg-red-600"
+              }`}
+            >
+              {loading
+                ? "Submitting to Engine..."
+                : reduceOnly
+                ? !activeMarketPosition
+                  ? "No Position to Reduce"
+                  : isReduceDirectionInvalid
+                  ? activeMarketPosition.side === "SHORT"
+                    ? "Switch to Long / Buy to Reduce Short"
+                    : "Switch to Short / Sell to Reduce Long"
+                  : activeMarketPosition.side === "SHORT"
+                  ? `Reduce Short ${qty} ${activeMarket?.baseToken || "BTC"}`
+                  : `Reduce Long ${qty} ${activeMarket?.baseToken || "BTC"}`
+                : isMarginExceeded
+                ? "Insufficient Available Margin"
+                : isLong
+                ? `Open Long ${qty} ${activeMarket?.baseToken || "BTC"}`
+                : `Open Short ${qty} ${activeMarket?.baseToken || "BTC"}`}
+            </button>
+          )}
         </div>
       </form>
     </div>

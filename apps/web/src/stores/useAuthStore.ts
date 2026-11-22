@@ -7,6 +7,9 @@ interface AuthState {
   user: UserProfile | null;
   wallet: UserWallet;
   isAuthenticated: boolean;
+  isAuthModalOpen: boolean;
+  openAuthModal: () => void;
+  closeAuthModal: () => void;
   login: (user: UserProfile) => void;
   logout: () => void;
   fetchWallet: () => Promise<void>;
@@ -23,6 +26,10 @@ export const useAuthStore = create<AuthState>((set) => {
     user: initialUser,
     wallet: { amountAvail: "0", amountLocked: "0" },
     isAuthenticated: !!savedToken,
+    isAuthModalOpen: false,
+
+    openAuthModal: () => set({ isAuthModalOpen: true }),
+    closeAuthModal: () => set({ isAuthModalOpen: false }),
 
     login: (user: UserProfile) => {
       localStorage.setItem("perps_token", user.token);

@@ -1,6 +1,41 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { createChart, ColorType, IChartApi, ISeriesApi } from "lightweight-charts";
 import { useMarketStore } from "../../stores/useMarketStore";
+
+const TIMEFRAME_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "1h": 3600,
+  "4h": 14400,
+  "1D": 86400,
+};
+
+function aggregateCandles(candles: any[], intervalSec: number): any[] {
+  if (intervalSec <= 60 || !candles || candles.length === 0) return candles;
+
+  const buckets = new Map<number, any>();
+  for (const c of candles) {
+    if (!c || typeof c.time !== "number") continue;
+    const bucketTime = Math.floor(c.time / intervalSec) * intervalSec;
+    const existing = buckets.get(bucketTime);
+    if (!existing) {
+      buckets.set(bucketTime, {
+        time: bucketTime,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      });
+    } else {
+      existing.high = Math.max(existing.high, c.high);
+      existing.low = Math.min(existing.low, c.low);
+      existing.close = c.close;
+    }
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
+}
 
 export const TradingChart: React.FC = () => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -9,7 +44,24 @@ export const TradingChart: React.FC = () => {
   const candlesRef = useRef<any[]>([]);
 
   const [activeTimeframe, setActiveTimeframe] = useState("1m");
-  const { activeMarket, markPrice } = useMarketStore();
+  const { activeMarket, markPrice, orderbook, trades } = useMarketStore();
+
+  // Determine current Perpetual Market Price (Last Traded Price on Engine)
+  const latestTradePrice = trades[0]?.price ? parseFloat(trades[0].price) : null;
+  const orderbookPrice = orderbook.lastTradedPrice ? parseFloat(orderbook.lastTradedPrice) : null;
+  const marketPerpPrice = activeMarket?.lastTradedPrice ? parseFloat(activeMarket.lastTradedPrice) : null;
+  const currentMark = parseFloat(markPrice || "0");
+
+  const currentPerpPrice =
+    latestTradePrice && latestTradePrice > 0
+      ? latestTradePrice
+      : (orderbookPrice && orderbookPrice > 0
+        ? orderbookPrice
+        : (marketPerpPrice && marketPerpPrice > 0
+          ? marketPerpPrice
+          : (currentMark > 0 ? currentMark : 89000)));
+
+  const spread = currentMark > 0 && currentPerpPrice > 0 ? currentPerpPrice - currentMark : null;
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -47,36 +99,35 @@ export const TradingChart: React.FC = () => {
       wickDownColor: "#ff3355",
     });
 
-    // Persistent Candlestick Data Retrieval
+    // Persistent Candlestick Data Retrieval for Perpetual Contract Trades
     const marketSymbol = activeMarket?.symbol || "BTC_USDC";
-    const storageKey = `perps_chart_candles_${marketSymbol}`;
+    const storageKey = `perps_chart_perp_candles_${marketSymbol}`;
     let candleData: any[] = [];
 
-    const basePrice = activeMarket
-      ? parseFloat(activeMarket.lastTradedPrice || activeMarket.markPrice || "89000")
-      : 89000;
-    const validBase = basePrice > 1000 ? basePrice : 89000;
+    const validBase = currentPerpPrice > 100 ? currentPerpPrice : (currentMark > 100 ? currentMark : 89000);
+    const minAllowed = validBase * 0.8;
+    const maxAllowed = validBase * 1.2;
 
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Filter out bad outliers (e.g. historical price 50 test fills)
+          // Strictly filter out historical price outliers within ±20%
           candleData = parsed.filter(
             (c) =>
               c &&
               typeof c.time === "number" &&
               typeof c.close === "number" &&
-              c.low > validBase * 0.2 &&
-              c.high < validBase * 5
+              c.low >= minAllowed &&
+              c.high <= maxAllowed
           );
         }
       }
     } catch {}
 
-    // If no saved history exists, generate initial realistic bars and persist
-    if (!candleData || !Array.isArray(candleData) || candleData.length === 0) {
+    // If no saved history exists or if outliers wiped out history, generate clean baseline bars around current perp price
+    if (!candleData || !Array.isArray(candleData) || candleData.length < 20) {
       const now = Math.floor(Date.now() / 60000) * 60;
       candleData = [];
       let current = validBase;
@@ -99,7 +150,9 @@ export const TradingChart: React.FC = () => {
     }
 
     candlesRef.current = candleData;
-    candleSeries.setData(candleData);
+    const intervalSec = TIMEFRAME_SECONDS[activeTimeframe] || 60;
+    const initialDisplay = aggregateCandles(candleData, intervalSec);
+    candleSeries.setData(initialDisplay);
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -138,23 +191,33 @@ export const TradingChart: React.FC = () => {
     };
   }, [activeMarket?.id, activeMarket?.symbol]);
 
-  // Real-time Bar Aggregation & Persistence when markPrice updates
+  // Handle Timeframe switching
   useEffect(() => {
-    if (!candleSeriesRef.current || !markPrice || parseFloat(markPrice) <= 0) return;
+    if (!candleSeriesRef.current || candlesRef.current.length === 0) return;
+    const intervalSec = TIMEFRAME_SECONDS[activeTimeframe] || 60;
+    const aggregated = aggregateCandles(candlesRef.current, intervalSec);
+    try {
+      candleSeriesRef.current.setData(aggregated);
+    } catch {}
+  }, [activeTimeframe]);
 
-    const price = parseFloat(markPrice);
+  // Real-time Bar Aggregation & Persistence when executed Perp Price or trades update
+  useEffect(() => {
+    if (!candleSeriesRef.current || currentPerpPrice <= 0) return;
+
+    const price = currentPerpPrice;
     const nowSec = Math.floor(Date.now() / 60000) * 60; // 1-minute bucket timestamp
 
     const lastIndex = candlesRef.current.length - 1;
     const lastCandle = lastIndex >= 0 ? candlesRef.current[lastIndex] : null;
 
-    // Outlier guard: discard anomalous price spikes
-    if (lastCandle && (price < lastCandle.close * 0.2 || price > lastCandle.close * 5)) {
+    // Outlier guard: discard anomalous price spikes beyond ±20%
+    if (lastCandle && (price < lastCandle.close * 0.8 || price > lastCandle.close * 1.2)) {
       return;
     }
 
     if (lastCandle && lastCandle.time === nowSec) {
-      // Update existing 1-minute candle
+      // Update existing 1-minute candle with executed perp price
       const updatedBar = {
         time: nowSec,
         open: lastCandle.open,
@@ -163,9 +226,6 @@ export const TradingChart: React.FC = () => {
         close: price,
       };
       candlesRef.current[lastIndex] = updatedBar;
-      try {
-        candleSeriesRef.current.update(updatedBar as any);
-      } catch {}
     } else {
       // Open a new 1-minute candle bar
       const newBar = {
@@ -176,8 +236,15 @@ export const TradingChart: React.FC = () => {
         close: price,
       };
       candlesRef.current.push(newBar);
+    }
+
+    // Update active chart view based on selected timeframe
+    const intervalSec = TIMEFRAME_SECONDS[activeTimeframe] || 60;
+    const aggregated = aggregateCandles(candlesRef.current, intervalSec);
+    const currentAggregatedBar = aggregated[aggregated.length - 1];
+    if (currentAggregatedBar) {
       try {
-        candleSeriesRef.current.update(newBar as any);
+        candleSeriesRef.current.update(currentAggregatedBar as any);
       } catch {}
     }
 
@@ -185,12 +252,12 @@ export const TradingChart: React.FC = () => {
     if (activeMarket?.symbol) {
       try {
         localStorage.setItem(
-          `perps_chart_candles_${activeMarket.symbol}`,
+          `perps_chart_perp_candles_${activeMarket.symbol}`,
           JSON.stringify(candlesRef.current.slice(-300))
         );
       } catch {}
     }
-  }, [markPrice, activeMarket?.symbol]);
+  }, [trades[0]?.price, orderbook.lastTradedPrice, activeMarket?.symbol, activeTimeframe]);
 
   return (
     <div className="relative flex h-full w-full flex-col bg-canvas">
@@ -211,9 +278,33 @@ export const TradingChart: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono text-slate-500 shrink-0">
-          <span className="h-1.5 w-1.5 rounded-full bg-bid animate-pulse" />
-          <span>Persistent Canvas Engine</span>
+
+        {/* Perp Price vs Mark Price Ticker Badge */}
+        <div className="flex items-center gap-3 text-[11px] font-mono shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400">Perp:</span>
+            <span className="font-bold text-white">
+              ${currentPerpPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div className="hidden md:flex items-center gap-1.5">
+            <span className="text-slate-400">Mark:</span>
+            <span className="text-slate-300">
+              ${currentMark > 0 ? currentMark.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+            </span>
+          </div>
+
+          {spread !== null && Math.abs(spread) > 0.01 && (
+            <div className={`hidden lg:flex items-center gap-1 font-semibold ${spread >= 0 ? "text-bid" : "text-ask"}`}>
+              <span>Spread: {spread >= 0 ? "+" : ""}${spread.toFixed(2)}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-bid animate-pulse" />
+            <span className="hidden sm:inline">Perp Fills Live</span>
+          </div>
         </div>
       </div>
 
