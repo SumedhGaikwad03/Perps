@@ -136,6 +136,15 @@ class WebSocketManager {
       return;
     }
 
+    // real-time wallet update (WALLET_UPDATE)
+    if (data && data.eventType === "WALLET_UPDATE") {
+      useAuthStore.getState().setWallet({
+        amountAvail: String(data.amountAvail ?? data.available_bal ?? "0"),
+        amountLocked: String(data.amountLocked ?? data.locked_bal ?? "0"),
+      });
+      useUserStore.getState().fetchLiveUser();
+    }
+
     // private user order updates (ORDER_UPDATE, ORDER_CANCELLED)
     if (data && (data.eventType === "ORDER_UPDATE" || data.eventType === "ORDER_CANCELLED")) {
       useUserStore.getState().updateOrder({

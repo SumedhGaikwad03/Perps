@@ -44,11 +44,13 @@ export const useAuthStore = create<AuthState>((set) => {
     fetchWallet: async () => {
       try {
         const live = await userService.getLiveState();
-        if (live && live.balances) {
+        const data = live?.data || live;
+        const balances = data?.balances;
+        if (balances) {
           set({
             wallet: {
-              amountAvail: live.balances.available_bal || "0",
-              amountLocked: live.balances.locked_bal || "0",
+              amountAvail: String(balances.available_bal ?? balances.amountAvail ?? "0"),
+              amountLocked: String(balances.locked_bal ?? balances.amountLocked ?? "0"),
             },
           });
         }

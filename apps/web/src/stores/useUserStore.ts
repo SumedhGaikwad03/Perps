@@ -41,46 +41,54 @@ export const useUserStore = create<UserState>((set) => ({
       const live = await userService.getLiveState();
 
       if (live) {
-        // format positions from live redis hashes
+        const data = live?.data || live;
+
+        // format positions from live redis hashes (backend returns data.postions array)
         const positionsList: Position[] = [];
-        if (live.positions) {
-          for (const [marketId, posData] of Object.entries(live.positions)) {
-            try {
-              const parsed = typeof posData === "string" ? JSON.parse(posData) : posData;
-              if (parsed && parseFloat(parsed.qty || "0") > 0) {
-                positionsList.push({
-                  marketId,
-                  side: parsed.side || "LONG",
-                  qty: parsed.qty,
-                  entryPrice: parsed.entryPrice,
-                  margin: parsed.margin,
-                  leverage: parsed.leverage,
-                  liquidationPrice: parsed.liquidationPrice,
-                });
-              }
-            } catch {}
-          }
+        const rawPositions = data.postions || data.positions || [];
+        const posArr = Array.isArray(rawPositions) ? rawPositions : Object.values(rawPositions);
+
+        for (const posData of posArr) {
+          try {
+            const parsed = typeof posData === "string" ? JSON.parse(posData) : posData;
+            if (parsed && parseFloat(parsed.qty || "0") > 0) {
+              positionsList.push({
+                marketId: parsed.marketId,
+                symbol: parsed.symbol,
+                side: parsed.side || (parseFloat(parsed.qty) > 0 ? "LONG" : "SHORT"),
+                qty: String(parsed.qty),
+                entryPrice: String(parsed.entryPrice || "0"),
+                margin: String(parsed.margin || "0"),
+                leverage: String(parsed.leverage || "1"),
+                liquidationPrice: parsed.liquidationPrice ? String(parsed.liquidationPrice) : null,
+              });
+            }
+          } catch {}
         }
 
-        // format open orders
+        // format open orders (backend returns data.openOrders array)
         const ordersList: OpenOrder[] = [];
-        if (live.openOrders) {
-          for (const [orderId, orderData] of Object.entries(live.openOrders)) {
-            try {
-              const parsed = typeof orderData === "string" ? JSON.parse(orderData) : orderData;
-              if (parsed) {
-                ordersList.push({
-                  orderId,
-                  marketId: parsed.marketId,
-                  side: parsed.side || "BID",
-                  price: parsed.price,
-                  qty: parsed.qty,
-                  filledQty: parsed.filledQty || "0",
-                  status: parsed.status || "OPEN",
-                });
-              }
-            } catch {}
-          }
+        const rawOrders = data.openOrders || [];
+        const ordersArr = Array.isArray(rawOrders) ? rawOrders : Object.values(rawOrders);
+
+        for (const orderData of ordersArr) {
+          try {
+            const parsed = typeof orderData === "string" ? JSON.parse(orderData) : orderData;
+            if (parsed) {
+              ordersList.push({
+                orderId: parsed.orderId || parsed.id,
+                marketId: parsed.marketId,
+                symbol: parsed.symbol,
+                side: parsed.side || parsed.orderSide || "BID",
+                price: String(parsed.price),
+                qty: String(parsed.qty),
+                filledQty: String(parsed.filledQty || "0"),
+                status: parsed.status || "OPEN",
+                orderType: parsed.orderType || "LIMIT",
+                createdAt: parsed.createdAt,
+              });
+            }
+          } catch {}
         }
 
         set({ positions: positionsList, openOrders: ordersList });

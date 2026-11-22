@@ -75,6 +75,16 @@ export async function handleOnRamp(
         }),
       });
 
+      // publish to real-time websocket user channel so frontend updates immediately
+      publisher.publish(
+        `pub:user:${userId}`,
+        JSON.stringify({
+          eventType: "WALLET_UPDATE",
+          amountAvail: newBalance,
+          amountLocked: currentBalances.locked_bal,
+        })
+      );
+
       await clientRead.xAck(STREAM_KEY, ENGINE_GROUP, streamEntryId);
       return;
 }
