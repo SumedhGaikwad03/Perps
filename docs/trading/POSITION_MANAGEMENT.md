@@ -19,11 +19,15 @@ export interface Position {
   entryPrice: string;
   margin: string;
   leverage: string;
+  liquidationPrice?: string | null;
 }
 ```
 * Keyed in-memory by composite key: `${userId}:${marketId}`.
 * In PostgreSQL, persisted in the `Position` table with a composite unique constraint on `[userId, marketId]`.
 * Sized as a signed integer/decimal string: `> 0` represents Long, `< 0` represents Short.
+* **Estimated Liquidation Mark Price**: Computed on position updates using Maintenance Margin Requirement ($\text{MMR} = 3\%$):
+  $$\text{Long Liq Price} = \text{EntryPrice} \times \left(1 - \frac{1}{\text{Leverage}} + \text{MMR}\right)$$
+  $$\text{Short Liq Price} = \text{EntryPrice} \times \left(1 + \frac{1}{\text{Leverage}} - \text{MMR}\right)$$
 
 ---
 

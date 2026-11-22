@@ -50,7 +50,7 @@ For complete, production-grade technical and architectural documentation, refer 
 * **[apps/engine](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/engine/README.md)**: Deterministic in-memory matching engine, risk manager, liquidation sweeper (1s interval), hourly funding settlements, and Binance mark price oracle.
 * **[apps/ws](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/ws/README.md)**: Real-time WebSocket streaming gateway bridging Redis Pub/Sub channels (`depth`, `trades`, `user`) to browsers.
 * **[apps/db-events](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/db-events/README.md)**: Background consumer group worker persisting trade fills, orders, positions, and balances to PostgreSQL.
-* **[apps/web](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/web/README.md)**: Vite + React 19 trading terminal with TradingView charts, Zustand state management, and real-time orderbook ladders.
+* **[apps/web](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/web/README.md)**: Vite + React institutional trading terminal with multi-page navigation (`/live`, `/markets`, `/portfolio`), TradingView candlestick charts driven by perpetual trade fills, smart Reduce Only position exit controls, real-time portfolio risk utilization meter, and L2 orderbook ladders.
 * **[apps/tests](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/tests/README.md)**: 24-suite integration test harness executing end-to-end multi-party trading simulations.
 * **[apps/docs](file:///c:/Users/777su/Desktop/Perps_Project/Perps/apps/docs/README.md)**: Next.js documentation portal scaffold.
 

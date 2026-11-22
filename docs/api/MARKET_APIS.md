@@ -85,7 +85,35 @@ Pulls all registered markets from PostgreSQL, retrieves the latest traded price 
 
 ---
 
-## 3. Admin Create Market (`POST /api/v1/admin/market`)
+## 3. Live System & Markets Overview (`GET /api/v1/live` and `GET /live`)
+
+Returns real-time system status, total registered markets, and live mark and perp prices for the frontend terminal and external health checks.
+
+* **Method**: `GET`
+* **URL**: `/api/v1/live` (also available via root alias `/live`)
+* **Authentication**: None (Public)
+
+### Success Response (`200 OK`):
+```json
+{
+  "status": "ONLINE",
+  "activeMarketsCount": 2,
+  "timestamp": 1732316400123,
+  "markets": [
+    {
+      "id": "019318a0-2f94-7128-b0cf-53e30f146a05",
+      "symbol": "BTC_USDC",
+      "baseToken": "BTC",
+      "lastTradedPrice": "90500.00",
+      "markPrice": "90510.50"
+    }
+  ]
+}
+```
+
+---
+
+## 4. Admin Create Market (`POST /api/v1/admin/market`)
 
 Administrative endpoint to create a new perpetual market in PostgreSQL and dynamically register it in the in-memory matching engine.
 
