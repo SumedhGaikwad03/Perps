@@ -16,6 +16,7 @@ export const TradingChart: React.FC = () => {
 
     // Initialize Lightweight Chart
     const chart = createChart(chartContainerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "#0b0e14" },
         textColor: "#94a3b8",
@@ -51,19 +52,31 @@ export const TradingChart: React.FC = () => {
     const storageKey = `perps_chart_candles_${marketSymbol}`;
     let candleData: any[] = [];
 
+    const basePrice = activeMarket
+      ? parseFloat(activeMarket.lastTradedPrice || activeMarket.markPrice || "89000")
+      : 89000;
+    const validBase = basePrice > 1000 ? basePrice : 89000;
+
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
-        candleData = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Filter out bad outliers (e.g. historical price 50 test fills)
+          candleData = parsed.filter(
+            (c) =>
+              c &&
+              typeof c.time === "number" &&
+              typeof c.close === "number" &&
+              c.low > validBase * 0.2 &&
+              c.high < validBase * 5
+          );
+        }
       }
     } catch {}
 
     // If no saved history exists, generate initial realistic bars and persist
     if (!candleData || !Array.isArray(candleData) || candleData.length === 0) {
-      const basePrice = activeMarket
-        ? parseFloat(activeMarket.lastTradedPrice || activeMarket.markPrice || "89000")
-        : 89000;
-      const validBase = basePrice > 0 ? basePrice : 89000;
       const now = Math.floor(Date.now() / 60000) * 60;
       candleData = [];
       let current = validBase;
@@ -91,7 +104,7 @@ export const TradingChart: React.FC = () => {
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
 
-    // Handle responsive container resize
+    // Handle responsive container resize via ResizeObserver and window events
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
         chartRef.current.applyOptions({
@@ -103,8 +116,24 @@ export const TradingChart: React.FC = () => {
 
     window.addEventListener("resize", handleResize);
 
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect && chartRef.current && chartContainerRef.current) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0) {
+            chartRef.current.applyOptions({ width, height });
+          }
+        }
+      }
+    });
+
+    if (chartContainerRef.current) {
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       chart.remove();
     };
   }, [activeMarket?.id, activeMarket?.symbol]);
@@ -118,6 +147,11 @@ export const TradingChart: React.FC = () => {
 
     const lastIndex = candlesRef.current.length - 1;
     const lastCandle = lastIndex >= 0 ? candlesRef.current[lastIndex] : null;
+
+    // Outlier guard: discard anomalous price spikes
+    if (lastCandle && (price < lastCandle.close * 0.2 || price > lastCandle.close * 5)) {
+      return;
+    }
 
     if (lastCandle && lastCandle.time === nowSec) {
       // Update existing 1-minute candle
@@ -184,7 +218,7 @@ export const TradingChart: React.FC = () => {
       </div>
 
       {/* Chart Canvas */}
-      <div ref={chartContainerRef} className="h-full w-full flex-1" />
+      <div ref={chartContainerRef} className="relative min-h-0 flex-1 w-full" />
     </div>
   );
 };

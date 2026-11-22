@@ -56,9 +56,10 @@ export const PositionsTable: React.FC = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-borderDark/40">
-          {positions.map((pos) => {
-            const marketObj = markets.find((m) => m.id === pos.marketId);
-            const symbol = marketObj?.symbol || pos.marketId.slice(0, 8);
+          {positions.map((pos, idx) => {
+            const marketIdStr = String(pos.marketId || "");
+            const marketObj = markets.find((m) => m.id === marketIdStr);
+            const symbol = marketObj?.symbol || (marketIdStr ? marketIdStr.slice(0, 8) : "BTC_USDC");
             const isLong = pos.side === "LONG";
 
             const entryNum = parseFloat(pos.entryPrice || "0");
@@ -66,7 +67,7 @@ export const PositionsTable: React.FC = () => {
             const marginNum = parseFloat(pos.margin || "1");
 
             // Calculate live PnL against the specific market's mark price
-            const isCurrentActive = activeMarket?.id === pos.marketId;
+            const isCurrentActive = activeMarket?.id === marketIdStr;
             const liveActiveMark = parseFloat(markPrice || "0");
             const marketStoredMark = parseFloat(marketObj?.markPrice || marketObj?.lastTradedPrice || "0");
             const markToUse = isCurrentActive && liveActiveMark > 0
@@ -78,7 +79,7 @@ export const PositionsTable: React.FC = () => {
             const isProfitable = pnl >= 0;
 
             return (
-              <tr key={pos.marketId} className="hover:bg-surface/50">
+              <tr key={marketIdStr || idx} className="hover:bg-surface/50">
                 <td className="py-2 px-3 font-bold text-white">{symbol}</td>
                 <td className="py-2 px-3">
                   <span

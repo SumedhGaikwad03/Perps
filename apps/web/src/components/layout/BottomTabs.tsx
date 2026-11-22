@@ -6,8 +6,16 @@ import { OpenOrdersTable } from "../positions/OpenOrdersTable";
 
 export const BottomTabs: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"positions" | "orders" | "balances">("positions");
-  const { positions, openOrders } = useUserStore();
-  const { wallet } = useAuthStore();
+  const { positions, openOrders, fetchLiveUser } = useUserStore();
+  const { wallet, isAuthenticated, fetchWallet } = useAuthStore();
+
+  const handleTabChange = (tab: "positions" | "orders" | "balances") => {
+    setActiveTab(tab);
+    if (isAuthenticated) {
+      fetchLiveUser();
+      fetchWallet();
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-panel border-t border-borderDark">
@@ -15,7 +23,7 @@ export const BottomTabs: React.FC = () => {
       <div className="flex h-9 items-center justify-between border-b border-borderDark px-3">
         <div className="flex items-center gap-4 text-xs font-semibold">
           <button
-            onClick={() => setActiveTab("positions")}
+            onClick={() => handleTabChange("positions")}
             className={`flex items-center gap-1.5 pb-2 pt-2 border-b-2 transition ${
               activeTab === "positions"
                 ? "border-accent text-white"
@@ -31,7 +39,7 @@ export const BottomTabs: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab("orders")}
+            onClick={() => handleTabChange("orders")}
             className={`flex items-center gap-1.5 pb-2 pt-2 border-b-2 transition ${
               activeTab === "orders"
                 ? "border-accent text-white"
@@ -47,7 +55,7 @@ export const BottomTabs: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab("balances")}
+            onClick={() => handleTabChange("balances")}
             className={`pb-2 pt-2 border-b-2 transition ${
               activeTab === "balances"
                 ? "border-accent text-white"

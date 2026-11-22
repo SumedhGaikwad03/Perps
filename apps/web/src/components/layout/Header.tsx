@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon, PlusCircle } from "lucide-react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
@@ -13,8 +13,46 @@ export const Header: React.FC = () => {
   const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false);
   const [isMarketDropdownOpen, setIsMarketDropdownOpen] = useState(false);
 
+  // Dynamic Funding Rate Countdown Timer
+  const [countdown, setCountdown] = useState("00:00:00");
+  const [fundingRate, setFundingRate] = useState("+0.0100%");
+
   const { markets, activeMarket, setActiveMarket, markPrice } = useMarketStore();
   const { user, wallet, isAuthenticated, logout } = useAuthStore();
+
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = new Date();
+      // Calculate remaining time until next top of the hour
+      const nextHour = new Date(now);
+      nextHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const diffMs = Math.max(0, nextHour.getTime() - now.getTime());
+
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+      setCountdown(
+        `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+      );
+
+      // Compute dynamic funding rate from mark price vs last traded price if available
+      const markNum = parseFloat(markPrice || "0");
+      const lastNum = parseFloat(activeMarket?.lastTradedPrice || "0");
+      if (markNum > 0 && lastNum > 0) {
+        const premium = (lastNum - markNum) / markNum;
+        const clamped = Math.min(Math.max(premium, -0.0005), 0.0005);
+        const pct = (clamped * 100).toFixed(4);
+        setFundingRate(`${clamped >= 0 ? "+" : ""}${pct}%`);
+      } else {
+        setFundingRate("+0.0100%");
+      }
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [markPrice, activeMarket?.lastTradedPrice]);
 
   const handleSelectMarket = (m: any) => {
     setActiveMarket(m);
@@ -139,7 +177,7 @@ export const Header: React.FC = () => {
 
             <div>
               <div className="text-[10px] text-slate-400">Funding / Countdown</div>
-              <div className="font-mono text-accent">0.0100% / 03:45:12</div>
+              <div className="font-mono text-accent">{fundingRate} / {countdown}</div>
             </div>
           </div>
         </div>

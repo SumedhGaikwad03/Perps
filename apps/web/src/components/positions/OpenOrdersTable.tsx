@@ -40,14 +40,19 @@ export const OpenOrdersTable: React.FC = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-borderDark/40">
-          {openOrders.map((order) => {
-            const marketObj = markets.find((m) => m.id === order.marketId);
-            const symbol = marketObj?.symbol || order.marketId.slice(0, 8);
+          {openOrders.map((order, idx) => {
+            const orderIdStr = String(order.orderId || "");
+            const marketIdStr = String(order.marketId || "");
+            const marketObj = markets.find((m) => m.id === marketIdStr);
+            const symbol = marketObj?.symbol || (marketIdStr ? marketIdStr.slice(0, 8) : "BTC_USDC");
             const isBuy = order.side === "BID";
+            const priceNum = parseFloat(order.price || "0");
 
             return (
-              <tr key={order.orderId} className="hover:bg-surface/50">
-                <td className="py-2 px-3 text-slate-400">{order.orderId.slice(0, 8)}...</td>
+              <tr key={orderIdStr || idx} className="hover:bg-surface/50">
+                <td className="py-2 px-3 text-slate-400">
+                  {orderIdStr ? `${orderIdStr.slice(0, 8)}...` : "—"}
+                </td>
                 <td className="py-2 px-3 font-bold text-white">{symbol}</td>
                 <td className="py-2 px-3">
                   <span
@@ -58,8 +63,10 @@ export const OpenOrdersTable: React.FC = () => {
                     {isBuy ? "BUY" : "SELL"}
                   </span>
                 </td>
-                <td className="py-2 px-3 text-slate-200">${parseFloat(order.price).toLocaleString()}</td>
-                <td className="py-2 px-3 text-slate-300">{order.qty}</td>
+                <td className="py-2 px-3 text-slate-200">
+                  ${priceNum > 0 ? priceNum.toLocaleString() : "MARKET"}
+                </td>
+                <td className="py-2 px-3 text-slate-300">{order.qty || "0"}</td>
                 <td className="py-2 px-3 font-mono font-medium text-slate-200">
                   {order.filledQty || "0"}
                 </td>
@@ -71,7 +78,7 @@ export const OpenOrdersTable: React.FC = () => {
                         : "bg-accent/10 text-accent"
                     }`}
                   >
-                    {order.status === "PARTIALLY_FILLED" ? "PARTIAL" : order.status}
+                    {order.status === "PARTIALLY_FILLED" ? "PARTIAL" : (order.status || "OPEN")}
                   </span>
                 </td>
                 <td className="py-2 px-3 text-right">

@@ -105,13 +105,18 @@ marketRouter.get("/markets", async (_req, res) => {
         if (fills24h.length > 0) {
           high24h = -Infinity;
           low24h = Infinity;
+          const ltp = parseFloat(lastTradedPrice) || 0;
           for (const fill of fills24h) {
             const p = parseFloat(fill.price);
             const q = parseFloat(fill.qty);
+            // Skip anomalous test fills that diverge by more than 5x or 80% from last traded price
+            if (ltp > 100 && (p < ltp * 0.2 || p > ltp * 5)) continue;
             volume24h += p * q;
             if (p > high24h) high24h = p;
             if (p < low24h) low24h = p;
           }
+          if (high24h === -Infinity) high24h = ltp;
+          if (low24h === Infinity) low24h = ltp;
         }
 
         return {
