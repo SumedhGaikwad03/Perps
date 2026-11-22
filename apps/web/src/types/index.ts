@@ -5,12 +5,28 @@ export interface Market {
   baseToken: string;
   tickSize: string;
   stepSize: string;
+  imgUrl?: string;
   lastTradedPrice?: string;
   markPrice?: string;
   priceChangePercent24h?: string;
   high24h?: string;
   low24h?: string;
   volume24h?: string;
+}
+
+export interface CreateMarketInput {
+  symbol: string;
+  slug: string;
+  baseToken: "BTC" | "SOL" | "ETH";
+  imgUrl?: string;
+  tickSize?: string;
+  stepSize?: string;
+}
+
+export interface CreateMarketResponse {
+  id: string;
+  message: string;
+  engineStatus?: any;
 }
 
 export type OrderbookLevel = [price: string, qty: string];

@@ -1,14 +1,16 @@
 import React, { useState } from "react";
-import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon } from "lucide-react";
+import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon, PlusCircle } from "lucide-react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { wsManager } from "../../services/websocket";
 import { AuthModal } from "../modals/AuthModal";
 import { DepositModal } from "../modals/DepositModal";
+import { CreateMarketModal } from "../modals/CreateMarketModal";
 
 export const Header: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false);
   const [isMarketDropdownOpen, setIsMarketDropdownOpen] = useState(false);
 
   const { markets, activeMarket, setActiveMarket, markPrice } = useMarketStore();
@@ -43,35 +45,66 @@ export const Header: React.FC = () => {
 
           <div className="h-4 w-px bg-borderDark" />
 
-          {/* Market Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setIsMarketDropdownOpen(!isMarketDropdownOpen)}
-              className="flex items-center gap-2 rounded-lg border border-borderDark bg-canvas px-2.5 py-1 text-sm font-bold text-white hover:border-slate-500"
-            >
-              <span>{activeMarket?.symbol || "BTC_USDC"}</span>
-              <ChevronDown className="h-4 w-4 text-slate-400" />
-            </button>
+          {/* Market Dropdown + Add Market Button */}
+          <div className="flex items-center gap-1.5">
+            <div className="relative">
+              <button
+                onClick={() => setIsMarketDropdownOpen(!isMarketDropdownOpen)}
+                className="flex items-center gap-2 rounded-lg border border-borderDark bg-canvas px-2.5 py-1 text-sm font-bold text-white hover:border-slate-500"
+              >
+                <span>{activeMarket?.symbol || "BTC_USDC"}</span>
+                <ChevronDown className="h-4 w-4 text-slate-400" />
+              </button>
 
-            {isMarketDropdownOpen && (
-              <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-borderDark bg-panel p-1.5 shadow-2xl">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-2 py-1">
-                  Perpetual Markets
+              {isMarketDropdownOpen && (
+                <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-lg border border-borderDark bg-panel p-1.5 shadow-2xl">
+                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    <span>Perpetual Markets</span>
+                    <span className="text-[9px] text-slate-500">{markets.length} active</span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto space-y-0.5">
+                    {markets.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleSelectMarket(m)}
+                        className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                          activeMarket?.id === m.id
+                            ? "bg-accent/20 text-white font-bold"
+                            : "text-slate-200 hover:bg-surface"
+                        }`}
+                      >
+                        <span className="font-bold">{m.symbol}</span>
+                        <span className="font-mono text-slate-400">
+                          ${parseFloat(m.markPrice || m.lastTradedPrice || "0").toLocaleString()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1 border-t border-borderDark/60 pt-1">
+                    <button
+                      onClick={() => {
+                        setIsMarketDropdownOpen(false);
+                        setIsCreateMarketOpen(true);
+                      }}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-md bg-accent/10 px-2 py-1.5 text-xs font-semibold text-accent hover:bg-accent hover:text-white transition"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Add New Market</span>
+                    </button>
+                  </div>
                 </div>
-                {markets.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => handleSelectMarket(m)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-slate-200 hover:bg-surface"
-                  >
-                    <span className="font-bold">{m.symbol}</span>
-                    <span className="font-mono text-slate-400">
-                      ${parseFloat(m.markPrice || "0").toLocaleString()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+              )}
+            </div>
+
+            {/* Quick Add Market Button */}
+            <button
+              onClick={() => setIsCreateMarketOpen(true)}
+              title="Add New Perpetual Market"
+              className="flex items-center gap-1 rounded-lg border border-borderDark bg-canvas px-2 py-1 text-xs font-semibold text-slate-300 hover:border-accent hover:text-accent transition"
+            >
+              <PlusCircle className="h-3.5 w-3.5 text-accent" />
+              <span className="hidden sm:inline">Add Market</span>
+            </button>
           </div>
 
           {/* Real-time Ticker Metrics */}
@@ -160,6 +193,7 @@ export const Header: React.FC = () => {
       {/* Modals */}
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
       <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
+      <CreateMarketModal isOpen={isCreateMarketOpen} onClose={() => setIsCreateMarketOpen(false)} />
     </>
   );
 };

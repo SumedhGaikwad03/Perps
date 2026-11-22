@@ -33,10 +33,29 @@ export const authService = {
 export const marketService = {
   getMarkets: async () => {
     const res = await api.get("/markets");
-    return res.data;
+    return res.data?.data || res.data;
   },
   getDepth: async (marketId: string) => {
     const res = await api.get(`/market/depth?marketId=${marketId}`);
+    return res.data?.data || res.data;
+  },
+  createMarket: async (
+    data: {
+      symbol: string;
+      slug: string;
+      baseToken: "BTC" | "SOL" | "ETH";
+      imgUrl?: string;
+      tickSize?: string;
+      stepSize?: string;
+    },
+    adminToken: string
+  ) => {
+    const res = await api.post("/admin/market", data, {
+      headers: {
+        admin_secret: adminToken,
+        "x-admin-token": adminToken,
+      },
+    });
     return res.data;
   },
 };
