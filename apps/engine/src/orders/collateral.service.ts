@@ -90,7 +90,7 @@ export async function handleOnRamp(
 }
 
 export async function handleOffRamp(
-  command: Extract<toEngine, { messageType: "OFF_RAMP" }>,
+  command: Extract<toEngine, {messageType: "OFF_RAMP"}>,
   loopbackId: string,
   streamEntryId: string,
   clientRead: { xAck: (key: string, group: string, id: string) => Promise<any> },
