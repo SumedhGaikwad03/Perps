@@ -1,4 +1,5 @@
 import type { OrderAcceptedPayload, toEngine } from "common";
+import type { OpenOrder, PriceLevel } from "../types";
 import Decimal from "decimal.js";
 import {
   getOrderBook,
@@ -657,3 +658,48 @@ export async function executeMatchingFunction(
     error: " ", // keeping it at top level so its easy to exectue at the top level
   });
 }
+
+/**
+ * Creates an empty price level.
+ */
+export function createPriceLevel(): PriceLevel {
+  return {
+    totalQty: "0",
+    orders: [],
+  };
+}
+
+/**
+ * Inserts an order into a price level queue and updates the total quantity.
+ */
+export function addOrderToLevel(
+  level: PriceLevel,
+  order: OpenOrder,
+  orderQty: number,
+): void {
+  level.orders.push(order);
+  level.totalQty = (parseFloat(level.totalQty) + orderQty).toString();
+}
+
+/**
+ * Delegates order execution to the core matching engine.
+ */
+export async function executeOrder(
+  command: Extract<toEngine, { messageType: "CREATE_ORDER" }>,
+  loopbackId: string,
+  streamEntryId: string,
+) {
+  return executeMatchingFunction(command, loopbackId, streamEntryId);
+}
+
+// Precision validation re-exports
+export * from "../utils/precision";
+
+/**
+ * Validation result for order parameter verification.
+ */
+export interface OrderValidationResult {
+  isValid: boolean;
+  error?: string;
+}
+

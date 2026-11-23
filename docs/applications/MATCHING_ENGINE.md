@@ -30,10 +30,7 @@ apps/engine/
 │   │   ├── mark-price.ts              # Mark price retrieval utilities
 │   │   └── index.ts                   # Market data exports
 │   ├── matching-engine/
-│   │   ├── matching.ts                # Main matching algorithm (executeMatchingFunction)
-│   │   ├── order-execution.ts         # Fill execution and book traversal
-│   │   ├── order-validation.ts        # Order sanity & bounds checks
-│   │   ├── price-level.ts             # PriceLevel FIFO queue helpers
+│   │   ├── matching.ts                # Main matching algorithm, execution, and price-level queue helpers
 │   │   └── index.ts                   # Matching exports
 │   ├── orders/
 │   │   ├── order.service.ts           # handleCreateOrder handler
