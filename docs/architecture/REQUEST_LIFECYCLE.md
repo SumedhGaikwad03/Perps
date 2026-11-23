@@ -106,17 +106,14 @@ const loopbackId = entry.message.loopbackId;
 const command: toEngine = JSON.parse(entry.message.payload!);
 ```
 
-The engine matches the order, calculates margin, updates positions, and replies:
+The engine matches the order, calculates margin, updates positions, and replies directly to the backend stream:
 ```typescript
-// apps/engine/src/streams/publisher.ts
-export async function replyToBackend(
-  loopbackId: string,
-  status: "SUCCESS" | "REJECTED",
-  data: string = "",
-  error: string = ""
-) {
-  return publisher.xAdd("to-backend", "*", { loopbackId, status, data, error });
-}
+await publisher.xAdd("to-backend", "*", {
+  loopbackId,
+  status: "SUCCESS",
+  data: JSON.stringify(result),
+  error: "",
+});
 ```
 And immediately acknowledges the entry in the `engine` stream:
 ```typescript
