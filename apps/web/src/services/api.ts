@@ -103,6 +103,10 @@ export const walletService = {
     const res = await api.post("/onRamp", { amount });
     return res.data;
   },
+  withdraw: async (amount: string) => {
+    const res = await api.post("/offRamp", { amount });
+    return res.data;
+  },
 };
 
 export const userService = {

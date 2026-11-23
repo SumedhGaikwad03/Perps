@@ -21,11 +21,13 @@ import { formatQty } from "../../utils/format";
 
 interface PortfolioPageProps {
   onOpenDeposit: () => void;
+  onOpenWithdraw?: () => void;
   onNavigateToLive: (symbol?: string) => void;
 }
 
 export const PortfolioPage: React.FC<PortfolioPageProps> = ({
   onOpenDeposit,
+  onOpenWithdraw,
   onNavigateToLive,
 }) => {
   const { wallet, user, isAuthenticated, fetchWallet, openAuthModal } = useAuthStore();
@@ -190,6 +192,16 @@ export const PortfolioPage: React.FC<PortfolioPageProps> = ({
               <ArrowDownLeft className="h-4 w-4" />
               <span>Deposit Collateral</span>
             </button>
+
+            {onOpenWithdraw && (
+              <button
+                onClick={onOpenWithdraw}
+                className="flex items-center gap-1.5 rounded-lg border border-ask/30 bg-ask/10 px-4 py-2 text-xs font-bold text-ask hover:bg-ask hover:text-white transition"
+              >
+                <ArrowUpRight className="h-4 w-4" />
+                <span>Withdraw / Off-Ramp</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -321,12 +333,22 @@ export const PortfolioPage: React.FC<PortfolioPageProps> = ({
               <Wallet className="h-4 w-4 text-accent" />
               <h2 className="text-xs font-bold text-white uppercase tracking-wider">Collateral Assets</h2>
             </div>
-            <button
-              onClick={onOpenDeposit}
-              className="text-xs text-accent hover:underline font-bold"
-            >
-              + Deposit USDC
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onOpenDeposit}
+                className="text-xs text-accent hover:underline font-bold"
+              >
+                + Deposit USDC
+              </button>
+              {onOpenWithdraw && (
+                <button
+                  onClick={onOpenWithdraw}
+                  className="text-xs text-ask hover:underline font-bold"
+                >
+                  - Withdraw USDC
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -367,12 +389,22 @@ export const PortfolioPage: React.FC<PortfolioPageProps> = ({
                     ${orderMargin.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={onOpenDeposit}
-                      className="rounded bg-accent/20 border border-accent/40 px-3 py-1 text-xs font-bold text-accent hover:bg-accent hover:text-white transition"
-                    >
-                      Deposit
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={onOpenDeposit}
+                        className="rounded bg-accent/20 border border-accent/40 px-2.5 py-1 text-xs font-bold text-accent hover:bg-accent hover:text-white transition"
+                      >
+                        Deposit
+                      </button>
+                      {onOpenWithdraw && (
+                        <button
+                          onClick={onOpenWithdraw}
+                          className="rounded bg-ask/20 border border-ask/40 px-2.5 py-1 text-xs font-bold text-ask hover:bg-ask hover:text-white transition"
+                        >
+                          Withdraw
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               </tbody>

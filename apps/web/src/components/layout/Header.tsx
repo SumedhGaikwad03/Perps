@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { ChevronDown, Plus, LogOut, Wallet, User as UserIcon, PlusCircle, PieChart } from "lucide-react";
+import { ChevronDown, Plus, Minus, LogOut, Wallet, User as UserIcon, PlusCircle, PieChart } from "lucide-react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { wsManager } from "../../services/websocket";
 import { AuthModal } from "../modals/AuthModal";
 import { DepositModal } from "../modals/DepositModal";
+import { WithdrawModal } from "../modals/WithdrawModal";
 import { CreateMarketModal } from "../modals/CreateMarketModal";
 
 interface HeaderProps {
@@ -12,6 +13,7 @@ interface HeaderProps {
   onNavigate?: (page: "live" | "markets" | "portfolio") => void;
   onOpenCreateMarket?: () => void;
   onOpenDeposit?: () => void;
+  onOpenWithdraw?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,8 +21,10 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   onOpenCreateMarket,
   onOpenDeposit,
+  onOpenWithdraw,
 }) => {
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false);
   const [isMarketDropdownOpen, setIsMarketDropdownOpen] = useState(false);
 
@@ -263,10 +267,20 @@ export const Header: React.FC<HeaderProps> = ({
                     if (onOpenDeposit) onOpenDeposit();
                     else setIsDepositOpen(true);
                   }}
-                  title="Deposit Collateral"
+                  title="Deposit Collateral (On-Ramp)"
                   className="flex h-5 w-5 items-center justify-center rounded bg-accent/20 text-accent transition hover:bg-accent hover:text-white"
                 >
                   <Plus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (onOpenWithdraw) onOpenWithdraw();
+                    else setIsWithdrawOpen(true);
+                  }}
+                  title="Withdraw Collateral (Off-Ramp)"
+                  className="flex h-5 w-5 items-center justify-center rounded bg-ask/20 text-ask transition hover:bg-ask hover:text-white"
+                >
+                  <Minus className="h-3.5 w-3.5" />
                 </button>
               </div>
 
@@ -299,6 +313,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Modals */}
       <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} />
       <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
+      <WithdrawModal isOpen={isWithdrawOpen} onClose={() => setIsWithdrawOpen(false)} />
       <CreateMarketModal isOpen={isCreateMarketOpen} onClose={() => setIsCreateMarketOpen(false)} />
     </>
   );

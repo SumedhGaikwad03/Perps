@@ -1,18 +1,13 @@
-import { Router} from "express"; 
-
+import { Router } from "express";
 import { loopback } from "../loopback";
 import { authmiddleware } from "../middleWare/authMiddleware";
 
 export const collateralRouter = Router();
 
-
 collateralRouter.post("/onRamp", authmiddleware, async (req, res) => {
   try {
-    const userId: string = req.userId!; // decoded by the  middleware
+    const userId: string = req.userId!;
 
-    console.log("req has reached loopback ");
-
-    // these are the type checks that are require to make sure all the system is working fine 
     const findAmount = req.body.amount;
     if (
       findAmount === null ||
@@ -29,6 +24,7 @@ collateralRouter.post("/onRamp", authmiddleware, async (req, res) => {
     if (!Number.isFinite(numAmount) || isNaN(numAmount) || numAmount <= 0) {
       return res.status(400).json("The amount is negative or invalid broo");
     }
+
     const queuedLoopbackResponse = await loopback({
       messageType: "ON_RAMP",
       amount: req.body.amount.toString(),
@@ -81,16 +77,3 @@ collateralRouter.post("/offRamp", authmiddleware, async (req, res) => {
     return res.status(500).json({ message: "Internal server error during withdrawal", error: String(error) });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-}); 

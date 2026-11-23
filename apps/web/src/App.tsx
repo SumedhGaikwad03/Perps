@@ -9,6 +9,7 @@ import { MarketsPage } from "./components/markets/MarketsPage";
 import { PortfolioPage } from "./components/portfolio/PortfolioPage";
 import { CreateMarketModal } from "./components/modals/CreateMarketModal";
 import { DepositModal } from "./components/modals/DepositModal";
+import { WithdrawModal } from "./components/modals/WithdrawModal";
 import { useMarketStore } from "./stores/useMarketStore";
 import { useAuthStore } from "./stores/useAuthStore";
 import { useUserStore } from "./stores/useUserStore";
@@ -29,6 +30,7 @@ export const App: React.FC = () => {
   const [selectedPrice, setSelectedPrice] = useState<string | null>(null);
   const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
 
   const { setMarkets, activeMarket, setActiveMarket, markets } = useMarketStore();
   const { isAuthenticated, fetchWallet } = useAuthStore();
@@ -128,6 +130,7 @@ export const App: React.FC = () => {
         onNavigate={handleNavigate}
         onOpenCreateMarket={() => setIsCreateMarketOpen(true)}
         onOpenDeposit={() => setIsDepositOpen(true)}
+        onOpenWithdraw={() => setIsWithdrawOpen(true)}
       />
 
       {/* Main Page Content Area */}
@@ -139,6 +142,7 @@ export const App: React.FC = () => {
       ) : currentPage === "portfolio" ? (
         <PortfolioPage
           onOpenDeposit={() => setIsDepositOpen(true)}
+          onOpenWithdraw={() => setIsWithdrawOpen(true)}
           onNavigateToLive={(sym) => handleNavigate("live", sym)}
         />
       ) : (
@@ -207,6 +211,10 @@ export const App: React.FC = () => {
       <DepositModal
         isOpen={isDepositOpen}
         onClose={() => setIsDepositOpen(false)}
+      />
+      <WithdrawModal
+        isOpen={isWithdrawOpen}
+        onClose={() => setIsWithdrawOpen(false)}
       />
     </div>
   );
