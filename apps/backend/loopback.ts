@@ -51,7 +51,6 @@ export function loopback(message: toEngine): Promise<unknown> {
     const pendingPromise: DefferedPromise = {
       resolve,
       reject,
-     
     };
 
     // Store the loopback id and the promise object in the map so we can later resolve it or reject it
@@ -98,9 +97,11 @@ export function loopback(message: toEngine): Promise<unknown> {
 }
 
 // Now the loopback also needs to listen to the messages from the engine
-async function main() {
+async function main(){
   while (1) {
-    // The consumer reads from the queue to-backend
+    // The consumer reads from the queue to-backend , that are essentally the requests that are sent by the 
+    // backend 
+    
     const currentMsg = await subscriber.xReadGroup(
       BACKEND_CONSUMER_GROUP,
       WORKER_NAME,
@@ -132,6 +133,7 @@ async function main() {
         error?: string;
       };
 
+      // resolve the promise that was stored in the map earlier 
       const pendingPromise = loopBackResolves.get(loopbackId);
 
       if (pendingPromise) {

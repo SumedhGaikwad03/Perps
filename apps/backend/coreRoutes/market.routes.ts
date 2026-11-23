@@ -104,6 +104,7 @@ marketRouter.get("/markets", async (_req, res) => {
           select: { price: true, qty: true },
         });
 
+        // now as we have all the fills with us then we can find the volume by doing pricex quantity
         let volume24h = 0;
         const baselinePrice = parseFloat(markPrice) > 0 ? parseFloat(markPrice) : (parseFloat(lastTradedPrice) || 0);
         let high24h = baselinePrice;
@@ -117,8 +118,10 @@ marketRouter.get("/markets", async (_req, res) => {
             const p = parseFloat(fill.price);
             const q = parseFloat(fill.qty);
             // Skip anomalous test fills that diverge by more than 5x or 80% from last traded price
+            // as the last traded price should not be an invaild ambigoius amount that we use for calaulations 
             if (ltp > 100 && (p < ltp * 0.2 || p > ltp * 5)) continue;
             volume24h += p * q;
+            // simple mech to calualte 24h hifh and 24 low for both 
             if (p > high24h) high24h = p;
             if (p < low24h) low24h = p;
           }

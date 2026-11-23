@@ -99,6 +99,7 @@ orderRouter.post(`/order`, authmiddleware, async (req: any, res) => {
     const orderId = Bun.randomUUIDv7();
 
     // this request goes to the loopback function in the backend
+    // here we are ignoring type safety for our own convience 
     const queuedLoopBackResponse : any  = await loopback({
       messageType: "CREATE_ORDER",
       side: side,
