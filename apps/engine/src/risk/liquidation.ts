@@ -93,19 +93,19 @@ export async function sweepLiquadations() {
 
       const newAvail = refundAmount + currentAvail;
 
-      setBalance(pos.userId, {
-        available_bal: newAvail.toString(),
-        locked_bal: newLocked.toString(),
-      });
+      // setBalance(pos.userId, {
+      //   available_bal: newAvail.toString(),
+      //   locked_bal: newLocked.toString(),
+      // });
 
-      await publisher.xAdd("db-events", "*", {
-        eventType: "WALLET_UPDATE",
-        payload: JSON.stringify({
-          userId: pos.userId,
-          amountAvail: newAvail.toString(),
-          amountLocked: newLocked.toString(),
-        }),
-      });
+      // await publisher.xAdd("db-events", "*", {
+      //   eventType: "WALLET_UPDATE",
+      //   payload: JSON.stringify({
+      //     userId: pos.userId,
+      //     amountAvail: newAvail.toString(),
+      //     amountLocked: newLocked.toString(),
+      //   }),
+      // });
 
       // we have make it real time so we have to backend or engine
 
