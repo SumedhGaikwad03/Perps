@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useMarketStore } from "../../stores/useMarketStore";
 import { useAuthStore } from "../../stores/useAuthStore";
@@ -43,7 +43,10 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
     );
   });
 
-  // If user clicks a row in the orderbook, prefill snapped price
+  // Tracks whether price has been initialized for the current active market
+  const initializedMarketId = useRef<string | null>(null);
+
+  // If user clicks a row in the orderbook, prefill snapped price (explicit user action)
   useEffect(() => {
     if (selectedPrice && activeMarket?.tickSize) {
       setPrice(snapToTick(selectedPrice, activeMarket.tickSize));
@@ -52,13 +55,18 @@ export const OrderEntry: React.FC<OrderEntryProps> = ({ selectedPrice }) => {
     }
   }, [selectedPrice, activeMarket?.tickSize]);
 
-  // Default price to snapped markPrice if empty
+  // Default price to snapped markPrice ONCE per market so typing a custom limit price isn't overwritten by live ticks
   useEffect(() => {
-    if (!price && markPrice && parseFloat(markPrice) > 0) {
-      const tick = activeMarket?.tickSize || "1";
-      setPrice(snapToTick(markPrice, tick));
+    if (!activeMarket?.id) return;
+    if (initializedMarketId.current === activeMarket.id) return;
+
+    const basePrice = markPrice || activeMarket.markPrice || activeMarket.lastTradedPrice;
+    if (basePrice && parseFloat(basePrice) > 0) {
+      initializedMarketId.current = activeMarket.id;
+      const tick = activeMarket.tickSize || "1";
+      setPrice(snapToTick(basePrice, tick));
     }
-  }, [markPrice, activeMarket?.tickSize]);
+  }, [activeMarket?.id, markPrice, activeMarket?.tickSize, activeMarket?.markPrice, activeMarket?.lastTradedPrice]);
 
   const handleMidClick = () => {
     let midVal = markPrice || activeMarket?.markPrice || activeMarket?.lastTradedPrice || "89000";
