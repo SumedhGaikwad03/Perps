@@ -1,9 +1,7 @@
 import { DefaultMrr } from "../config";
 
-/**
- * Calculates maintenance margin required for an open position:
- * qty * markPrice * DefaultMrr
- */
+// Calculates maintenance margin required for an open position:
+// qty * markPrice * DefaultMrr
 export function calculateMaintenanceMargin(
   qty: number,
   markPrice: number,
@@ -12,10 +10,8 @@ export function calculateMaintenanceMargin(
   return qty * markPrice * mrr;
 }
 
-/**
- * Calculates initial margin required for a position or order:
- * (qty * price) / leverage
- */
+// Calculates initial margin required for a position or order:
+// (qty * price) / leverage
 export function calculateInitialMargin(
   qty: number,
   price: number,
@@ -25,13 +21,12 @@ export function calculateInitialMargin(
   return (qty * price) / leverage;
 }
 
-/**
- * Calculates position equity:
- * initialMargin + unRealaisedPnl
- */
+// Calculates position equity:
+// initialMargin + unRealaisedPnl
 export function calculateEquity(
   initialMargin: number,
   unrealizedPnl: number,
 ): number {
   return initialMargin + unrealizedPnl;
 }
+

@@ -75,7 +75,7 @@ export async function handleOnRamp(
         }),
       });
 
-      // publish to real-time websocket user channel so frontend updates immediately
+      // publish to real-time websocket user channel so frontend updates immediately with the new bal 
       publisher.publish(
         `pub:user:${userId}`,
         JSON.stringify({
@@ -137,11 +137,12 @@ export async function handleOffRamp(
 
       await publisher.xAdd("to-backend","*",{
         loopbackId,
-        status : "SUCESS",
-        data : "",
-        error : "THE_AMOUNT_WAS_DEDUCTED_BRO"
+        status : "SUCCESS",
+        error : "",
+        data : "THE_AMOUNT_WAS_TRANSFERED_BRO"
       });
 
       await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,streamEntryId);
      return; 
 }
+

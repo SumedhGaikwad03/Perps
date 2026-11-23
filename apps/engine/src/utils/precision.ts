@@ -1,9 +1,7 @@
 import Decimal from "decimal.js";
 
-/**
- * Precision validation utilities for market step size and tick size.
- * Uses exact Decimal math to prevent floating point modulo errors.
- */
+// Precision validation utilities for market step size and tick size.
+// Uses exact Decimal math to prevent floating point modulo errors.
 
 export function isValidStepSize(qty: number | string, stepSize?: string): boolean {
   if (!stepSize) return true;

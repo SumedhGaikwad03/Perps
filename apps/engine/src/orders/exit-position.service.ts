@@ -8,6 +8,7 @@ export async function handleExitPosition(
   command: Extract<toEngine, { messageType: "EXIT_POSITION" }>,
   loopbackId: string,
   streamEntryId: string,
+  // we import the entire redis client instance altogether 
   clientRead: { xAck: (key: string, group: string, id: string) => Promise<any> },
 ): Promise<void> {
       // this mesage type is basiclly an call back to the the create order type as that this is essentially
@@ -71,8 +72,8 @@ export async function handleExitPosition(
         orderType: "MARKET", // we always exit at the market right bro ? 
       };
       // the dummy order is now created we have to pass this order to the matchiing engine now
-
-
+   
+      // if the order below fails then we have to implement ADL  in the system 
       await executeMatchingFunction(DummyOrder , loopbackId , streamEntryId);
 
  // now everthing is handeled by the engine 

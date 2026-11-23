@@ -37,7 +37,7 @@ export async function executeMatchingFunction(
   const userLeverage = parseFloat(leverage);
 
   if (!book) {
-    // we here are essentially returing a string that resolves to a promise 
+    // we here are essentially returing a string that resolves to a promise
     return "book not found broo";
   }
 
@@ -106,7 +106,7 @@ export async function executeMatchingFunction(
     }
 
     // even at this point the availble qty is not enough to make the order
-    // worth it to take this order now 
+    // worth it to take this order now
     if (available_qty < numQty) {
       // TO MAKE THE TAKER GET BACK HIS COLLATERAL AS
 
@@ -155,9 +155,12 @@ export async function executeMatchingFunction(
   for (const priceKey of sortedPrices) {
     // THIS LOOP WILL KEEP ON FILLING ORDER UNITL THE REMANING QTY IS ZERO OR THREE ARE NO SUTABLE ORDERS TO SWAP AGAINST
 
-    if (remaningQty <= 0) {
-      break;
-    }
+    // this remaing qty is for the current order that the user has
+    if (remaningQty <= 0){
+    
+     break ;
+    
+    } 
 
     const levelPrice = parseFloat(priceKey); // WE HAVE THE CURRENT BEST PRICE
     // the prices were already sorted so this made sense
@@ -166,7 +169,9 @@ export async function executeMatchingFunction(
       // at limit orders the best price for each table is defined as as we cant find a better price then we break it off
 
       if (isBid && levelPrice > numPrice) break; // ask price is greater than num price that is given to the system by user
+     
       if (!isBid && levelPrice < numPrice) break; // bid price is greater
+    
     }
 
     // is all is set for limit or simply the order is for market then
@@ -185,7 +190,10 @@ export async function executeMatchingFunction(
 
       const dRestingQty = new Decimal(restingOrder.qty);
       const dRestingFilled = new Decimal(restingOrder.filledQty || "0");
-      const dRestingRemaining = Decimal.max(0, dRestingQty.minus(dRestingFilled));
+      const dRestingRemaining = Decimal.max(
+        0,
+        dRestingQty.minus(dRestingFilled),
+      );
 
       // The quantity that is matched with the order is calculated with exact Decimal math
       const dMatchQty = Decimal.min(dRemaningQty, dRestingRemaining);
@@ -194,7 +202,9 @@ export async function executeMatchingFunction(
       }
 
       const matchQty = dMatchQty.toNumber();
-      const dMakerRemainingMargin = new Decimal(restingOrder.lockedMargin || "0");
+      const dMakerRemainingMargin = new Decimal(
+        restingOrder.lockedMargin || "0",
+      );
 
       const dMakerMarginToRelease = dRestingRemaining.gt(0)
         ? Decimal.min(
@@ -246,7 +256,10 @@ export async function executeMatchingFunction(
             orderId: restingOrder.originalOrderId,
             status: isMakerFullyFilled ? "FILLED" : "PARTIALLY_FILLED",
             executeQty: restingOrder.filledQty,
-            remaningQty: Decimal.max(0, dRestingQty.minus(newRestingFilled)).toString(),
+            remaningQty: Decimal.max(
+              0,
+              dRestingQty.minus(newRestingFilled),
+            ).toString(),
           }),
         )
         .catch((err) =>
@@ -257,27 +270,34 @@ export async function executeMatchingFunction(
       if (isMakerFullyFilled) {
         // this removes the order at index 0 and slides every other order by one position
         priceLevel.orders.shift();
-        DeleteMirrordOpenOrder(restingOrder.userId, restingOrder.originalOrderId);
+        DeleteMirrordOpenOrder(
+          restingOrder.userId,
+          restingOrder.originalOrderId,
+        );
       } else {
         // update maker resting order in redis open_orders mirror with new filledQty and status
-        publisher.hSet(
-          `user:${restingOrder.userId}:open_orders`,
-          restingOrder.originalOrderId,
-          JSON.stringify({
-            orderId: restingOrder.originalOrderId,
-            userId: restingOrder.userId,
-            marketId,
-            orderType: "LIMIT",
-            side: isBid ? "ASK" : "BID",
-            price: priceKey,
-            qty: restingOrder.qty,
-            filledQty: restingOrder.filledQty,
-            status: "PARTIALLY_FILLED",
-            lockedMargin: restingOrder.lockedMargin,
-            reduceOnly: restingOrder.reduceOnly,
-            createdAt: Date.now(),
-          })
-        ).catch((err) => console.error("Error updating maker open order in Redis:", err));
+        publisher
+          .hSet(
+            `user:${restingOrder.userId}:open_orders`,
+            restingOrder.originalOrderId,
+            JSON.stringify({
+              orderId: restingOrder.originalOrderId,
+              userId: restingOrder.userId,
+              marketId,
+              orderType: "LIMIT",
+              side: isBid ? "ASK" : "BID",
+              price: priceKey,
+              qty: restingOrder.qty,
+              filledQty: restingOrder.filledQty,
+              status: "PARTIALLY_FILLED",
+              lockedMargin: restingOrder.lockedMargin,
+              reduceOnly: restingOrder.reduceOnly,
+              createdAt: Date.now(),
+            }),
+          )
+          .catch((err) =>
+            console.error("Error updating maker open order in Redis:", err),
+          );
       }
 
       // if all the oders at the order book are eaten then we delete that price level
@@ -333,8 +353,6 @@ export async function executeMatchingFunction(
           available_bal: makerBal.available_bal,
           locked_bal: updatedLockedBalance.toString(),
         });
-
-       
 
         await publisher.xAdd("db-events", "*", {
           eventType: "WALLET_UPDATE",
@@ -441,7 +459,7 @@ export async function executeMatchingFunction(
 
   if (dRemaningQty.lte(0)) {
     finalStatus = "FILLED";
-     DeleteMirrordOpenOrder(userId,orderId);
+    DeleteMirrordOpenOrder(userId, orderId);
     //return ;
   } else {
     //in case of a limit order we debralrt did not match the order as we dont have the required price but orders still exist
@@ -485,7 +503,7 @@ export async function executeMatchingFunction(
         reduceOnly: Boolean(command.reduceOnly),
       });
 
-      // now we have to mirror the open order in the 
+      // now we have to mirror the open order in the
       //updating the depth of the order for that level
       level.totalQty = (parseFloat(level.totalQty) + remaningQty).toString();
     } else {
@@ -573,40 +591,44 @@ export async function executeMatchingFunction(
     ? 0
     : (numQty * numPrice) / userLeverage;
 
-
-  const OrderAcceptedPayload : OrderAcceptedPayload = {
-        
-      orderId,
-      marketId,
-      userId,
-      orderType,
-      orderSide: side,
-      price: orderType === "LIMIT" ? price! : null,
-      qty,
-      timeInForce: command.timeInForce,
-      reduceOnly: Boolean(command.reduceOnly),
-      initialMargin: initialMargin.toString(),
-      lockedMargin: remainingOrderMargin.toString(),
-
-
-  } 
-  // this is we havt to tell the user that the order is done and is ready a that info should go to the 
-  // dashboard websocket now 
-  publisher.publish(`pub:user:${userId}`, JSON.stringify({
-      eventType : "ORDER_UPDATE",
-      orderId ,
-      status : finalStatus,
-      executeQty : executedQtyStr,
-      remaningQty : remaningQtyStr,
-  }))
-  .catch((err)=> `The error is defined as ${err}`);
+  const OrderAcceptedPayload: OrderAcceptedPayload = {
+    orderId,
+    marketId,
+    userId,
+    orderType,
+    orderSide: side,
+    price: orderType === "LIMIT" ? price! : null,
+    qty,
+    timeInForce: command.timeInForce,
+    reduceOnly: Boolean(command.reduceOnly),
+    initialMargin: initialMargin.toString(),
+    lockedMargin: remainingOrderMargin.toString(),
+  };
+  // this is we havt to tell the user that the order is done and is ready a that info should go to the
+  // dashboard websocket now
+  publisher
+    .publish(
+      `pub:user:${userId}`,
+      JSON.stringify({
+        eventType: "ORDER_UPDATE",
+        orderId,
+        status: finalStatus,
+        executeQty: executedQtyStr,
+        remaningQty: remaningQtyStr,
+      }),
+    )
+    .catch((err) => `The error is defined as ${err}`);
 
   await publisher.xAdd("db-events", "*", {
     eventType: "ORDER_ACCEPTED",
     payload: JSON.stringify(OrderAcceptedPayload),
   });
 
-  if (orderType === "LIMIT" && command.timeInForce === "GTC" && dRemaningQty.gt(0)) {
+  if (
+    orderType === "LIMIT" &&
+    command.timeInForce === "GTC" &&
+    dRemaningQty.gt(0)
+  ) {
     MirrorOpenOrder({
       ...OrderAcceptedPayload,
       filledQty: executedQtyStr,
@@ -637,7 +659,9 @@ export async function executeMatchingFunction(
     });
     publisher
       .publish(`pub:trades:${marketId}`, tradePayload)
-      .catch((err) => console.error("Error publishing trades by marketId:", err));
+      .catch((err) =>
+        console.error("Error publishing trades by marketId:", err),
+      );
     publisher
       .publish(`pub:trades:${book.symbol}`, tradePayload)
       .catch((err) => console.error("Error publishing trades by symbol:", err));
@@ -659,9 +683,7 @@ export async function executeMatchingFunction(
   });
 }
 
-/**
- * Creates an empty price level.
- */
+// Creates an empty price level
 export function createPriceLevel(): PriceLevel {
   return {
     totalQty: "0",
@@ -669,9 +691,7 @@ export function createPriceLevel(): PriceLevel {
   };
 }
 
-/**
- * Inserts an order into a price level queue and updates the total quantity.
- */
+// Inserts an order into a price level queue and updates the total quantity
 export function addOrderToLevel(
   level: PriceLevel,
   order: OpenOrder,
@@ -681,9 +701,7 @@ export function addOrderToLevel(
   level.totalQty = (parseFloat(level.totalQty) + orderQty).toString();
 }
 
-/**
- * Delegates order execution to the core matching engine.
- */
+// Delegates order execution to the core matching engine
 export async function executeOrder(
   command: Extract<toEngine, { messageType: "CREATE_ORDER" }>,
   loopbackId: string,
@@ -695,11 +713,8 @@ export async function executeOrder(
 // Precision validation re-exports
 export * from "../utils/precision";
 
-/**
- * Validation result for order parameter verification.
- */
+// Validation result for order parameter verification
 export interface OrderValidationResult {
   isValid: boolean;
   error?: string;
 }
-

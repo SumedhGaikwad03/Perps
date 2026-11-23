@@ -67,6 +67,7 @@ export async function handleCancelOrder(
           // that means we have found the order on our own
           if (idx !== -1) {
             // We have retrived this order here
+            // idx is the id of the order here 
             foundOrder = level.orders[idx]!;
 
             orderPrice = priceKey;
@@ -77,7 +78,7 @@ export async function handleCancelOrder(
 
             // now we get the user balances for this type
 
-            const UserBalance = getOrCreateBalance(userId);
+            const UserBalance = getOrCreateBalance(userId); 
 
             // this is the margi tied to this order by the user - we calauclate pro rated remaining margin
             const remainingMargin = foundOrder!.reduceOnly

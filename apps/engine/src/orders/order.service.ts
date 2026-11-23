@@ -60,6 +60,7 @@ export async function handleCreateOrder(
   const userBalance = getOrCreateBalance(userId);
   const numQty = parseFloat(qty);
   // here we infer what type of price does the user wants as its a limit price or market price
+  // in market price we dont pass the price , that falls back to the last trader price 
   const numPrice = price ? parseFloat(price) : book.lastTradedPrice;
 
   const userLeverage = command.leverage ? parseFloat(leverage) : 1;

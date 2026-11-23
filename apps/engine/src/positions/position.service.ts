@@ -189,9 +189,9 @@ export async function updatePositionFills(
     });
   }
 
-  /* ==========================================================================
-     DEAD CODE FOR REVIEW - OPPOSING SIDE POSITION UPDATE (PREVIOUS LOGIC)
-     ==========================================================================
+  // ==========================================================================
+  // DEAD CODE FOR REVIEW - OPPOSING SIDE POSITION UPDATE (PREVIOUS LOGIC)
+  // ==========================================================================
   // // now to handel the opposing side as
   // // as this is the term when side is not equal and the fills are higher than the required
   // // amount
@@ -276,5 +276,5 @@ export async function updatePositionFills(
   //     });
   //   }
   // }
-     ========================================================================== */
+  // ==========================================================================
 }

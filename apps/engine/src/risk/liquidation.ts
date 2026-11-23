@@ -66,6 +66,9 @@ export async function sweepLiquadations() {
     );
 
     if (equity <= maintainenceMargin) {
+
+      // HERE INSTED OF DELTING THE POSTION WE SHOULD crete an order for the postion at the current price 
+      // that would be better as the other party should not hold exposure against thin air in the system 
       deletePosition(posKey);
 
       // delete the postion and the loss is taken up by the exchaange

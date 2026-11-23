@@ -1,9 +1,6 @@
-/**
- * Calculates realized PnL for closed position quantity.
- * Preserves the exact calculation from updatePositionFills:
- *   LONG:  (incomingPrice - existingPrice) * closedQty
- *   SHORT: (existingPrice - incomingPrice) * closedQty
- */
+// Calculates realized PnL for closed position quantity
+// LONG:  (incomingPrice - existingPrice) * closedQty
+// SHORT: (existingPrice - incomingPrice) * closedQty
 export function calculateRealizedPnl(
   side: "LONG" | "SHORT",
   entryPrice: number,
@@ -15,12 +12,9 @@ export function calculateRealizedPnl(
     : (entryPrice - exitPrice) * closedQty;
 }
 
-/**
- * Calculates unrealized PnL for active position quantity against mark price.
- * Preserves the exact calculation from sweepLiquadations:
- *   LONG:  (markPrice - entryPrice) * qty
- *   SHORT: (entryPrice - markPrice) * qty
- */
+// Calculates unrealized PnL for active position quantity against mark price
+// LONG:  (markPrice - entryPrice) * qty
+// SHORT: (entryPrice - markPrice) * qty
 export function calculateUnrealizedPnl(
   side: "LONG" | "SHORT",
   entryPrice: number,
@@ -31,3 +25,4 @@ export function calculateUnrealizedPnl(
     ? (markPrice - entryPrice) * qty
     : (entryPrice - markPrice) * qty;
 }
+

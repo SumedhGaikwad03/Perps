@@ -1,8 +1,6 @@
 import Decimal from "decimal.js";
 
-/**
- * Snaps a price to the nearest tickSize multiple, formatted to tickSize decimal precision.
- */
+// Snaps a price to the nearest tickSize multiple, formatted to tickSize decimal precision.
 export function snapToTick(price: string | number, tickSize: string | number): string {
   try {
     const dPrice = new Decimal(price);
@@ -17,9 +15,7 @@ export function snapToTick(price: string | number, tickSize: string | number): s
   }
 }
 
-/**
- * Snaps a quantity to the nearest stepSize multiple, formatted to stepSize decimal precision.
- */
+// Snaps a quantity to the nearest stepSize multiple, formatted to stepSize decimal precision.
 export function snapToStep(qty: string | number, stepSize: string | number): string {
   try {
     const dQty = new Decimal(qty);
@@ -34,10 +30,8 @@ export function snapToStep(qty: string | number, stepSize: string | number): str
   }
 }
 
-/**
- * Formats a quantity with exact decimal precision based on market stepSize,
- * eliminating all IEEE 754 float precision artifacts.
- */
+// Formats a quantity with exact decimal precision based on market stepSize,
+// eliminating all IEEE 754 float precision artifacts.
 export function formatQty(qty: string | number | undefined | null, stepSize?: string): string {
   if (qty === undefined || qty === null || qty === "") return "0";
   try {
@@ -54,9 +48,7 @@ export function formatQty(qty: string | number | undefined | null, stepSize?: st
   }
 }
 
-/**
- * Formats a price with exact decimal precision based on market tickSize.
- */
+// Formats a price with exact decimal precision based on market tickSize.
 export function formatPrice(price: string | number | undefined | null, tickSize?: string): string {
   if (price === undefined || price === null || price === "") return "0";
   try {
@@ -72,10 +64,8 @@ export function formatPrice(price: string | number | undefined | null, tickSize?
   }
 }
 
-/**
- * Normalizes a number string by trimming and removing extraneous trailing zeros
- * while maintaining exact decimal value.
- */
+// Normalizes a number string by trimming and removing extraneous trailing zeros
+// while maintaining exact decimal value.
 export function normalizeDecimal(val: string | number): string {
   try {
     return new Decimal(val).toString();
@@ -83,3 +73,4 @@ export function normalizeDecimal(val: string | number): string {
     return String(val);
   }
 }
+
