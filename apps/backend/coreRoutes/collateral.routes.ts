@@ -49,36 +49,38 @@ collateralRouter.post("/onRamp", authmiddleware, async (req, res) => {
   }
 });
 
-collateralRouter.post("/offRamp",authmiddleware, async (req , res ) => {
-
+collateralRouter.post("/offRamp", authmiddleware, async (req, res) => {
   try {
-// this is the function that is used to of load the balances of the user 
+    const userId = req.userId!;
 
-// extarcting thr user id from the middle layers 
-const userId = req.userId!;
+    if (!req.body.amount || isNaN(parseFloat(req.body.amount)) || parseFloat(req.body.amount) <= 0) {
+      return res.status(400).json({ message: "Invalid withdrawal amount" });
+    }
 
-const amount = req.body.amount.toString(); 
+    const amount = req.body.amount.toString();
 
-// supposer we vaildated the req of the if the userid and amount are not the same 
+    const queuedLoopBackResponse: any = await loopback({
+      messageType: "OFF_RAMP",
+      userId: userId,
+      amount: amount,
+    });
 
-const queuedLoopBackResponse = await loopback({
+    if (queuedLoopBackResponse?.status === "REJECTED") {
+      return res.status(400).json({
+        message: queuedLoopBackResponse.error || "Withdrawal rejected by engine",
+        result: queuedLoopBackResponse,
+      });
+    }
 
-  messageType : "OFF_RAMP",
-  userId : userId,
-  amount : amount,
-}) ; 
-
-if(queuedLoopBackResponse){
-  console.log("yooooo you got the money right ? ");
-}
-
-return res.status(200).json({message: "the money is withdrawn broo" , result : queuedLoopBackResponse});
-
-  }catch(error){
-
-    console.log("Broo there has been an erroe as ",error);
-    return res.status(500).json({message: "Broo there has been an erroe as ",error});
+    return res.status(200).json({
+      message: "The money is withdrawn successfully",
+      result: queuedLoopBackResponse,
+    });
+  } catch (error) {
+    console.log("Error in offRamp:", error);
+    return res.status(500).json({ message: "Internal server error during withdrawal", error: String(error) });
   }
+});
 
 
 

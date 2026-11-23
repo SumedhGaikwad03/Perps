@@ -130,16 +130,27 @@ export async function handleOffRamp(
 
       }
 
+      const newAvailBal = (parseFloat(currentBalances!.available_bal) - amountToDeduct).toString();
+
       setBalance(userId, {
-        available_bal: (parseFloat(currentBalances!.available_bal) - amountToDeduct).toString(),
+        available_bal: newAvailBal,
         locked_bal: currentBalances!.locked_bal,
       });
 
-      await publisher.xAdd("to-backend","*",{
+      await publisher.xAdd("db-events", "*", {
+        eventType: "WALLET_UPDATE",
+        payload: JSON.stringify({
+          userId,
+          amountAvail: newAvailBal,
+          amountLocked: currentBalances!.locked_bal,
+        }),
+      });
+
+      await publisher.xAdd("to-backend", "*", {
         loopbackId,
-        status : "SUCCESS",
-        error : "",
-        data : "THE_AMOUNT_WAS_TRANSFERED_BRO"
+        status: "SUCCESS",
+        error: "",
+        data: "THE_AMOUNT_WAS_TRANSFERED_BRO",
       });
 
       await clientRead.xAck(STREAM_KEY,ENGINE_GROUP,streamEntryId);
