@@ -24,7 +24,7 @@ app.use("/api/v1", authRouter);
 app.use("/api/v1", orderRouter);
 app.use("/api/v1", marketRouter);
 app.use("/api/v1", collateralRouter);
-//app.use("/api/v1/user", userRouter);
+app.use("/api/v1/user", userRouter);
 app.use("/api/v1", userRouter);
 
 // Direct root routes for convenience

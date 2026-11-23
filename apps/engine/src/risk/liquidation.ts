@@ -54,8 +54,10 @@ export async function sweepLiquadations() {
       qty,
     );
 
-    // this is a cusion for the user as this much amount can be backed by the user here 
+    // this is a cusion for the user as this much amount can be backed by the user here
+    // as this is the total amount the user can handel  
     const equity = calculateEquity(initialMargin, unRealaisedPnl);
+
 
     const maintainenceMargin = calculateMaintenanceMargin(
       qty,
@@ -86,6 +88,7 @@ export async function sweepLiquadations() {
 
       const newLocked = Math.max(0, locked_bal - initialMargin);
       
+      // as even when the margin is below zero the equity is still there with the user right 
       const refundAmount = Math.max(0, equity);
 
       const newAvail = refundAmount + currentAvail;
@@ -112,18 +115,40 @@ export async function sweepLiquadations() {
       
       // we have to clear the order book for the user for any resting pos or fields that he may have
 
+      // this below is the margin for the bids side that will take refunded to the user who just got liquadated 
+      let cancelledOrderMagin = 0 ; 
+
       for (const [priceKey, level] of book.bids.entries()) {
         // we start to traverse the order book , find how may orders exists at that price level
         const intialOrderCount = level.orders.length;
+
+        for(const o of level.orders){
+
+          if(o.userId == pos.userId){
+
+            let unfullfilledQty = parseFloat(o.qty) - parseFloat(o.filledQty);
+            let initialMargin = parseFloat(o.lockedMargin); 
+            cancelledOrderMagin += initialMargin * (unfullfilledQty/parseFloat(o.qty));
+
+
+          }
+        } 
+       
+
         // find how may orders are not equal to the surrent user id , actually the orders are deleted here
+        // that is the ordrs for the actual users are deleted here 
+
+
         level.orders = level.orders.filter((o) => o.userId !== pos.userId);
 
         if (level.orders.length !== intialOrderCount) {
           // loop executing here is proff that there are some orders that belong to the user here
           if (level.orders.length === 0) {
             // as if there are no orders apart form the user orders then its a waste of time
+            // we delete that price level now 
             book.bids.delete(priceKey);
           } else {
+            // update the unfullfilled qty at that order level here 
             level.totalQty = level.orders
               .reduce(
                 (sum, o) => sum + (parseFloat(o.qty) - parseFloat(o.filledQty)),
@@ -138,6 +163,18 @@ export async function sweepLiquadations() {
       // for  the time for asks now
       for (const [priceKey, level] of book.asks.entries()) {
         const intialOrderCount = level.orders.length;
+
+        for(const o of level.orders){
+
+          if(o.userId == pos.userId){
+
+            let unfullfilledQty = parseFloat(o.qty) - parseFloat(o.filledQty);
+            let initialMargin = parseFloat(o.lockedMargin); 
+            cancelledOrderMagin += initialMargin * (unfullfilledQty/parseFloat(o.qty));
+
+
+          }
+        } 
         // clearing the order for the users that are not here
         level.orders = level.orders.filter((o) => o.userId !== pos.userId);
 
@@ -154,6 +191,23 @@ export async function sweepLiquadations() {
           }
         } 
       }
+
+
+       setBalance(pos.userId ,{available_bal : (newAvail + cancelledOrderMagin).toString() ,
+          locked_bal : (newLocked - cancelledOrderMagin).toString()
+         }); 
+
+
+
+      await publisher.xAdd("db-events" ,"*" ,{
+        eventType : "WALLET_UPDATE",
+        payload : JSON.stringify({
+          userId : pos.userId ,
+          amountAvail : (newAvail + cancelledOrderMagin).toString(),
+          amountLocked : (newLocked - cancelledOrderMagin).toString(),
+
+        }),
+      });
 
       // this removes it form the db events
       await publisher.xAdd("db-events", "*", {
